@@ -1,0 +1,28 @@
+{{define "layout"}}<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{template "title" .}} · Scruples</title>
+  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-full bg-slate-950 text-slate-100 antialiased">
+  {{if .User}}
+  <nav class="sticky top-0 z-10 border-b border-slate-800 bg-slate-950/90 backdrop-blur">
+    <div class="mx-auto flex max-w-2xl items-center gap-4 px-4 py-3 text-sm">
+      <a href="/" class="text-lg font-extrabold tracking-tight text-indigo-400">Scruples</a>
+      <div class="flex flex-1 items-center gap-3 overflow-x-auto whitespace-nowrap">
+        <a href="/cards" class="rounded-lg px-2 py-1 font-medium {{if hasPrefix .Path "/cards"}}bg-indigo-600/20 text-indigo-300{{else}}text-slate-300 hover:text-indigo-300{{end}}">Deck</a>
+        <a href="/game" class="rounded-lg px-2 py-1 font-medium {{if hasPrefix .Path "/game"}}bg-indigo-600/20 text-indigo-300{{else}}text-slate-300 hover:text-indigo-300{{end}}">Play</a>
+        <a href="/winners" class="rounded-lg px-2 py-1 font-medium {{if hasPrefix .Path "/winners"}}bg-indigo-600/20 text-indigo-300{{else}}text-slate-300 hover:text-indigo-300{{end}}">Winners</a>
+      </div>
+      <form method="post" action="/logout">
+        <button type="submit" class="text-xs text-slate-400 hover:text-slate-200">Log out</button>
+      </form>
+    </div>
+  </nav>
+  {{end}}
+  <main class="max-w-2xl mx-auto px-4 py-6">{{template "content" .}}</main>
+</body>
+</html>{{end}}

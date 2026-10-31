@@ -1,0 +1,11 @@
+# SQLite database (production data lives only on the server)
+*.db
+*.db-shm
+*.db-wal
+
+# Built binary
+/scruples
+
+# Local tooling
+.claude/
+.DS_Store

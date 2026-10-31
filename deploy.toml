@@ -1,0 +1,17 @@
+# Deployed by roost (https://github.com/nick-gerrard/roost): push to main -> live.
+name = "scruples"
+subdomain = "scruples"
+on = "push"
+
+[backend]                         # Go, backend-only: nginx sends / straight to the app
+runtime = "go"
+workdir = "."
+project = "."
+build = "/snap/bin/go build -o scruples ."
+start = "scruples"
+health = "/login"
+
+[backend.env]
+SCRUPLES_ADDR = "127.0.0.1:{port}"
+SCRUPLES_DB = "scruples.db"       # in the checkout, gitignored; survives deploys
+# SCRUPLES_ADMIN_PASSWORD lives in the server's roost env file, not here.

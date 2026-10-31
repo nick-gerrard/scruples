@@ -1,0 +1,200 @@
+{{define "title"}}Play{{end}}
+
+{{define "content"}}
+<div id="game-state" hx-get="/game/state" hx-trigger="every 2s" hx-swap="innerHTML">{{template "game-state" .}}</div>
+{{end}}
+
+{{define "start-form"}}
+<form id="start-form" hx-preserve hx-post="/game/start" hx-target="#game-state" hx-swap="innerHTML" class="space-y-4 rounded-2xl border border-slate-800 bg-slate-900 p-5">
+  <div class="text-lg font-bold">Start a game</div>
+  <label class="block cursor-pointer rounded-2xl border border-slate-700 bg-slate-950/60 p-4 transition has-[:checked]:border-indigo-500 has-[:checked]:bg-indigo-600/10">
+    <input type="radio" name="mode" value="classic" checked class="sr-only">
+    <div class="font-bold text-indigo-300">Classic</div>
+    <div class="mt-0.5 text-sm text-slate-400">Race to N points — guess what the drawer would really do.</div>
+  </label>
+  <label class="block cursor-pointer rounded-2xl border border-slate-700 bg-slate-950/60 p-4 transition has-[:checked]:border-indigo-500 has-[:checked]:bg-indigo-600/10">
+    <input type="radio" name="mode" value="freeplay" class="sr-only">
+    <div class="font-bold text-violet-300">Free play</div>
+    <div class="mt-0.5 text-sm text-slate-400">Endless dilemmas — everyone answers for themselves.</div>
+  </label>
+  <div>
+    <label for="point_goal" class="block text-sm font-medium text-slate-300">Point goal <span class="text-slate-500">(classic only)</span></label>
+    <input type="number" id="point_goal" name="point_goal" value="5" min="1" max="100" class="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-slate-100 focus:border-indigo-500 focus:outline-none">
+  </div>
+  <button type="submit" class="w-full rounded-xl bg-indigo-600 py-3 text-lg font-bold transition hover:bg-indigo-500 active:scale-[0.99]">Start game</button>
+</form>
+{{end}}
+
+{{define "vote-list"}}
+{{$r := .Round}}
+{{if $r.Revealed}}
+<div class="divide-y divide-slate-800 rounded-2xl border border-slate-800 bg-slate-900">
+  {{range $r.Revealed}}
+  <div class="flex items-center justify-between px-4 py-2.5 text-sm">
+    <span class="font-medium">{{.Name}}</span>
+    <span class="flex items-center gap-2">
+      <span class="font-bold uppercase {{if eq .Vote "yes"}}text-emerald-400{{else}}text-rose-400{{end}}">{{.Vote}}</span>
+      {{if $.Classic}}{{if .Correct}}<span class="text-emerald-400">✓</span>{{else}}<span class="text-rose-400">✗</span>{{end}}{{end}}
+    </span>
+  </div>
+  {{end}}
+</div>
+{{end}}
+{{end}}
+
+{{define "game-state"}}
+{{$d := .Data}}
+{{if $d.Error}}
+<div class="mb-4 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">{{$d.Error}}</div>
+{{end}}
+{{if $d.NoGame}}
+<div class="space-y-6">
+  <div>
+    <h1 class="text-3xl font-extrabold tracking-tight">Play</h1>
+    <p class="mt-1 text-slate-400">No game running — start one and get everyone in.</p>
+  </div>
+  {{template "start-form" $d}}
+</div>
+{{else if $d.GameOver}}
+<div class="space-y-6">
+  <div class="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-6 text-center">
+    {{if $d.Winners}}
+    <div class="text-5xl">🏆</div>
+    <div class="mt-3 text-2xl font-extrabold text-amber-300">{{range $i, $n := $d.Winners}}{{if $i}} &amp; {{end}}{{$n}}{{end}} win{{if eq (len $d.Winners) 1}}s{{end}}!</div>
+    {{if $d.Classic}}<div class="mt-1 text-sm text-amber-200/70">first to {{$d.PointGoal}}</div>{{end}}
+    {{else}}
+    <div class="text-2xl font-extrabold text-slate-200">Game over</div>
+    <div class="mt-1 text-sm text-slate-400">{{if $d.Classic}}Ended early — no winner this time.{{else}}Thanks for playing.{{end}}</div>
+    {{end}}
+  </div>
+  {{if $d.Players}}
+  <div class="divide-y divide-slate-800 rounded-2xl border border-slate-800 bg-slate-900">
+    {{range $d.Players}}
+    <div class="flex items-center justify-between px-4 py-2.5 text-sm">
+      <span class="font-semibold">{{if .IsWinner}}👑 {{end}}{{.Name}}{{if .IsMe}} <span class="text-xs font-normal text-indigo-400">(you)</span>{{end}}</span>
+      {{if $d.Classic}}<span class="text-slate-400">{{.Points}} pts</span>{{end}}
+    </div>
+    {{end}}
+  </div>
+  {{end}}
+  {{template "start-form" $d}}
+</div>
+{{else}}
+<div class="space-y-5">
+  <div class="flex flex-wrap items-center gap-2">
+    <span class="rounded-full bg-indigo-600/20 px-3 py-1 text-xs font-bold uppercase tracking-wide text-indigo-300">{{if $d.Classic}}Classic{{else}}Free play{{end}}</span>
+    {{if $d.Classic}}<span class="text-xs text-slate-400">first to {{$d.PointGoal}} points</span>{{end}}
+  </div>
+
+  <div class="flex flex-wrap gap-2">
+    {{range $d.Players}}
+    <span class="inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm {{if .IsMe}}border-indigo-500/60 bg-indigo-600/15 text-indigo-200{{else}}border-slate-800 bg-slate-900 text-slate-300{{end}}{{if .IsNext}} ring-2 ring-violet-500/50{{end}}">
+      <span class="font-semibold">{{.Name}}</span>{{if $d.Classic}}<span class="{{if .IsMe}}text-indigo-300{{else}}text-slate-500{{end}}">· {{.Points}}</span>{{end}}
+    </span>
+    {{end}}
+  </div>
+
+  {{if not $d.Me.Joined}}
+  <button hx-post="/game/join" hx-target="#game-state" hx-swap="innerHTML" class="w-full rounded-xl bg-indigo-600 py-4 text-lg font-bold transition hover:bg-indigo-500 active:scale-[0.99]">Join the game</button>
+  {{end}}
+
+  {{if not $d.Round}}
+    {{if $d.Me.CanDraw}}
+    <button hx-post="/game/draw" hx-target="#game-state" hx-swap="innerHTML" class="w-full rounded-xl bg-indigo-600 py-4 text-lg font-bold transition hover:bg-indigo-500 active:scale-[0.99]">🃏 Draw a card</button>
+    {{else}}
+    <div class="rounded-2xl border border-slate-800 bg-slate-900 p-5 text-center text-slate-400">
+      {{if $d.Classic}}Waiting for <span class="font-semibold text-slate-200">{{$d.NextDrawerName}}</span> to draw…{{else}}Waiting for someone to draw…{{end}}
+    </div>
+    {{end}}
+  {{else}}
+    {{$r := $d.Round}}
+    <div class="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+      <p class="italic text-slate-300">{{$r.Card.Circumstance}}</p>
+      <p class="mt-3 text-lg font-bold">{{$r.Card.Question}}</p>
+      <p class="mt-4 text-xs text-slate-500">drawn by {{$r.DrawerName}}</p>
+    </div>
+
+    {{if eq $r.Status "voting"}}
+      {{if and $d.Classic $d.Me.IsDrawer}}
+        {{if $d.Me.AnswerSet}}
+        <div class="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 p-4 text-center font-semibold text-emerald-300">Answer locked in ✓</div>
+        {{else}}
+        <div class="text-center font-semibold">What would you <span class="text-indigo-300">ACTUALLY</span> do?</div>
+        <div class="grid grid-cols-2 gap-3">
+          <button hx-post="/game/answer" hx-vals='{"answer":"yes"}' hx-target="#game-state" hx-swap="innerHTML" class="rounded-xl bg-emerald-600 py-4 text-xl font-extrabold transition hover:bg-emerald-500 active:scale-[0.99]">YES</button>
+          <button hx-post="/game/answer" hx-vals='{"answer":"no"}' hx-target="#game-state" hx-swap="innerHTML" class="rounded-xl bg-rose-600 py-4 text-xl font-extrabold transition hover:bg-rose-500 active:scale-[0.99]">NO</button>
+        </div>
+        {{end}}
+      {{else if $d.Me.Eligible}}
+        {{if $d.Me.InitialVote}}
+        <div class="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 p-4 text-center font-semibold text-emerald-300">Vote cast ✓</div>
+        {{else}}
+        <div class="text-center font-semibold">{{if $d.Classic}}Would <span class="text-indigo-300">{{$r.DrawerName}}</span> do it?{{else}}Would <span class="text-indigo-300">YOU</span> do it?{{end}}</div>
+        <div class="grid grid-cols-2 gap-3">
+          <button hx-post="/game/vote" hx-vals='{"vote":"yes"}' hx-target="#game-state" hx-swap="innerHTML" class="rounded-xl bg-emerald-600 py-4 text-xl font-extrabold transition hover:bg-emerald-500 active:scale-[0.99]">YES</button>
+          <button hx-post="/game/vote" hx-vals='{"vote":"no"}' hx-target="#game-state" hx-swap="innerHTML" class="rounded-xl bg-rose-600 py-4 text-xl font-extrabold transition hover:bg-rose-500 active:scale-[0.99]">NO</button>
+        </div>
+        {{end}}
+      {{else if $d.Me.Joined}}
+      <div class="text-center text-sm text-slate-500">You joined mid-round — you're in from the next card.</div>
+      {{end}}
+      <div class="text-center text-sm text-slate-400">{{$r.VotesIn}}/{{$r.VotesTotal}} in{{if $r.WaitingOn}} · waiting on: {{range $i, $n := $r.WaitingOn}}{{if $i}}, {{end}}{{$n}}{{end}}{{end}}</div>
+    {{end}}
+
+    {{if eq $r.Status "revealed"}}
+      {{if $d.Classic}}
+      <div class="rounded-2xl border border-indigo-500/40 bg-indigo-600/10 p-5 text-center">
+        <div class="text-sm text-indigo-300">{{$r.DrawerName}} says</div>
+        <div class="mt-1 text-4xl font-extrabold uppercase {{if eq $r.DrawerAnswer "yes"}}text-emerald-400{{else}}text-rose-400{{end}}">{{$r.DrawerAnswer}}</div>
+      </div>
+      {{template "vote-list" $d}}
+      {{if $d.Me.CanChallenge}}
+      <button hx-post="/game/challenge" hx-confirm="Call the bluff — would {{$r.DrawerName}} really do that?" hx-target="#game-state" hx-swap="innerHTML" class="w-full rounded-xl bg-amber-600 py-3 text-lg font-bold transition hover:bg-amber-500 active:scale-[0.99]">Challenge!</button>
+      {{end}}
+      {{if $d.Me.Joined}}
+      <button hx-post="/game/next" hx-target="#game-state" hx-swap="innerHTML" class="w-full rounded-xl bg-indigo-600 py-3 text-lg font-bold transition hover:bg-indigo-500 active:scale-[0.99]">Accept · next round</button>
+      {{end}}
+      {{else}}
+      <div class="grid grid-cols-2 gap-3 text-center">
+        <div class="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 p-4">
+          <div class="text-3xl font-extrabold text-emerald-400">{{$r.YesCount}}</div>
+          <div class="text-xs font-bold uppercase tracking-wide text-emerald-300">yes</div>
+        </div>
+        <div class="rounded-2xl border border-rose-500/40 bg-rose-500/10 p-4">
+          <div class="text-3xl font-extrabold text-rose-400">{{$r.NoCount}}</div>
+          <div class="text-xs font-bold uppercase tracking-wide text-rose-300">no</div>
+        </div>
+      </div>
+      {{template "vote-list" $d}}
+      {{if $d.Me.Joined}}
+      <button hx-post="/game/next" hx-target="#game-state" hx-swap="innerHTML" class="w-full rounded-xl bg-indigo-600 py-3 text-lg font-bold transition hover:bg-indigo-500 active:scale-[0.99]">Next card</button>
+      {{end}}
+      {{end}}
+    {{end}}
+
+    {{if eq $r.Status "challenge"}}
+      <div class="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 text-center font-semibold text-amber-300">{{$r.ChallengerName}} calls bluff — would {{$r.DrawerName}} <span class="uppercase">really</span> do it?</div>
+      <div class="text-center text-sm text-slate-400">{{$r.DrawerName}} claimed <span class="font-bold uppercase {{if eq $r.DrawerAnswer "yes"}}text-emerald-400{{else}}text-rose-400{{end}}">{{$r.DrawerAnswer}}</span></div>
+      {{template "vote-list" $d}}
+      {{if and $d.Me.Eligible (not $d.Me.IsDrawer)}}
+        {{if $d.Me.ChallengeVote}}
+        <div class="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 p-4 text-center font-semibold text-emerald-300">Re-vote cast ✓</div>
+        {{else}}
+        <div class="grid grid-cols-2 gap-3">
+          <button hx-post="/game/challenge/vote" hx-vals='{"vote":"yes"}' hx-target="#game-state" hx-swap="innerHTML" class="rounded-xl bg-emerald-600 py-4 text-xl font-extrabold transition hover:bg-emerald-500 active:scale-[0.99]">YES</button>
+          <button hx-post="/game/challenge/vote" hx-vals='{"vote":"no"}' hx-target="#game-state" hx-swap="innerHTML" class="rounded-xl bg-rose-600 py-4 text-xl font-extrabold transition hover:bg-rose-500 active:scale-[0.99]">NO</button>
+        </div>
+        {{end}}
+      {{end}}
+      <div class="text-center text-sm text-slate-400">{{$r.ChallengeIn}}/{{$r.ChallengeTotal}} in{{if $r.ChallengeWaitingOn}} · waiting on: {{range $i, $n := $r.ChallengeWaitingOn}}{{if $i}}, {{end}}{{$n}}{{end}}{{end}}</div>
+    {{end}}
+  {{end}}
+
+  {{if $d.Me.CanEnd}}
+  <div class="pt-2 text-center">
+    <button hx-post="/game/end" hx-confirm="End this game for everyone?" hx-target="#game-state" hx-swap="innerHTML" class="text-xs text-slate-500 underline hover:text-rose-400">End game</button>
+  </div>
+  {{end}}
+</div>
+{{end}}
+{{end}}

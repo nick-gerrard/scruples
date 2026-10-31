@@ -1,0 +1,25 @@
+{{define "title"}}Home{{end}}
+
+{{define "content"}}
+<div class="space-y-6">
+  <div>
+    <h1 class="text-3xl font-extrabold tracking-tight">Hey {{.User.Username}}</h1>
+    <p class="mt-1 text-slate-400">Crowdsourced moral dilemmas — write them, then find out what your friends would really do.</p>
+  </div>
+
+  <div class="space-y-4">
+    <a href="/cards" class="block rounded-2xl border border-slate-800 bg-slate-900 p-5 transition hover:border-indigo-500/60 hover:bg-slate-900/70 active:scale-[0.99]">
+      <div class="text-xl font-bold text-indigo-300">The Deck</div>
+      <div class="mt-1 text-sm text-slate-400">Read &amp; write dilemmas</div>
+    </a>
+    <a href="/game" class="block rounded-2xl border border-slate-800 bg-slate-900 p-5 transition hover:border-violet-500/60 hover:bg-slate-900/70 active:scale-[0.99]">
+      <div class="text-xl font-bold text-violet-300">Play</div>
+      <div class="mt-1 text-sm text-slate-400">The communal game</div>
+    </a>
+    <a href="/winners" class="block rounded-2xl border border-slate-800 bg-slate-900 p-5 transition hover:border-indigo-500/60 hover:bg-slate-900/70 active:scale-[0.99]">
+      <div class="text-xl font-bold text-indigo-300">Hall of Fame</div>
+      <div class="mt-1 text-sm text-slate-400">Past winners &amp; glory</div>
+    </a>
+  </div>
+</div>
+{{end}}
