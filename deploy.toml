@@ -7,7 +7,7 @@ on = "push"
 runtime = "go"
 workdir = "."
 project = "."
-build = "/snap/bin/go build -o scruples ."
+build = "/snap/go/current/bin/go build -o scruples ."   # not /snap/bin/go: the snap wrapper is killed inside a systemd service
 start = "scruples"
 health = "/login"
 
