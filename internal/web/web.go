@@ -137,6 +137,16 @@ func (a *App) CreateSession(w http.ResponseWriter, userID int64) error {
 	return nil
 }
 
+// DestroyOtherSessions deletes every session for the user except the request's own.
+func (a *App) DestroyOtherSessions(r *http.Request, userID int64) error {
+	current := ""
+	if c, err := r.Cookie(sessionCookie); err == nil {
+		current = c.Value
+	}
+	_, err := a.DB.Exec(`DELETE FROM sessions WHERE user_id = ? AND token != ?`, userID, current)
+	return err
+}
+
 // DestroySession deletes the request's session row and expires the cookie.
 func (a *App) DestroySession(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(sessionCookie); err == nil && c.Value != "" {

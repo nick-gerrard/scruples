@@ -32,7 +32,8 @@ func main() {
 		log.Fatalf("opening database: %v", err)
 	}
 
-	if err := auth.SeedAdmin(database, adminPassword); err != nil {
+	resetAdmin := os.Getenv("SCRUPLES_RESET_ADMIN_PASSWORD") == "1"
+	if err := auth.SeedAdmin(database, adminPassword, resetAdmin); err != nil {
 		log.Fatalf("seeding admin user: %v", err)
 	}
 

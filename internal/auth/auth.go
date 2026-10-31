@@ -12,17 +12,23 @@ import (
 	"scruples/internal/web"
 )
 
-// SeedAdmin creates or updates the admin user "nick" with the given password.
-// The password from the environment always wins over an existing hash.
-func SeedAdmin(db *sql.DB, password string) error {
+// SeedAdmin makes sure the admin user "nick" exists. The given password is only
+// used when the user is first created, so a password changed on the account page
+// survives restarts; pass reset=true to force it back to the given password
+// (lockout recovery).
+func SeedAdmin(db *sql.DB, password string, reset bool) error {
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return err
 	}
+	onConflict := `UPDATE SET is_admin = 1`
+	if reset {
+		onConflict = `UPDATE SET password_hash = excluded.password_hash, is_admin = 1`
+	}
 	_, err = db.Exec(`
 		INSERT INTO users (username, password_hash, is_admin)
 		VALUES ('nick', ?, 1)
-		ON CONFLICT(username) DO UPDATE SET password_hash = excluded.password_hash, is_admin = 1`,
+		ON CONFLICT(username) DO `+onConflict,
 		string(hash),
 	)
 	return err
@@ -34,6 +40,13 @@ type formData struct {
 	Error    string
 	Username string
 }
+
+type accountData struct {
+	Error   string
+	Success string
+}
+
+const minPasswordLen = 6
 
 // Routes registers the auth routes on the mux.
 func Routes(mux *http.ServeMux, app *web.App) {
@@ -89,7 +102,7 @@ func Routes(mux *http.ServeMux, app *web.App) {
 			fail("Username must be 1-30 characters: letters, numbers, _ or - only.")
 			return
 		}
-		if len(password) < 6 {
+		if len(password) < minPasswordLen {
 			fail("Password must be at least 6 characters.")
 			return
 		}
@@ -127,6 +140,56 @@ func Routes(mux *http.ServeMux, app *web.App) {
 		}
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 	})
+
+	mux.HandleFunc("GET /account", app.RequireUser(func(w http.ResponseWriter, r *http.Request) {
+		app.Render(w, r, "account.html", accountData{})
+	}))
+
+	mux.HandleFunc("POST /account/password", app.RequireUser(func(w http.ResponseWriter, r *http.Request) {
+		user := app.CurrentUser(r)
+		current := r.FormValue("current_password")
+		next := r.FormValue("new_password")
+
+		fail := func(msg string) {
+			app.Render(w, r, "account.html", accountData{Error: msg})
+		}
+
+		var hash string
+		if err := app.DB.QueryRow(`SELECT password_hash FROM users WHERE id = ?`, user.ID).Scan(&hash); err != nil {
+			log.Printf("change password: load user: %v", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+		if bcrypt.CompareHashAndPassword([]byte(hash), []byte(current)) != nil {
+			fail("Your current password isn't right.")
+			return
+		}
+		if len(next) < minPasswordLen {
+			fail("New password must be at least 6 characters.")
+			return
+		}
+		if next != r.FormValue("confirm_password") {
+			fail("The new passwords don't match.")
+			return
+		}
+
+		newHash, err := bcrypt.GenerateFromPassword([]byte(next), bcrypt.DefaultCost)
+		if err != nil {
+			log.Printf("change password: bcrypt: %v", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+		if _, err := app.DB.Exec(`UPDATE users SET password_hash = ? WHERE id = ?`, string(newHash), user.ID); err != nil {
+			log.Printf("change password: update: %v", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+		// Anyone else signed in with the old password gets logged out.
+		if err := app.DestroyOtherSessions(r, user.ID); err != nil {
+			log.Printf("change password: destroy other sessions: %v", err)
+		}
+		app.Render(w, r, "account.html", accountData{Success: "Password changed. Other devices have been signed out."})
+	}))
 
 	mux.HandleFunc("POST /logout", func(w http.ResponseWriter, r *http.Request) {
 		app.DestroySession(w, r)
