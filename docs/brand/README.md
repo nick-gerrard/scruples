@@ -1,6 +1,6 @@
 # Scruples brand assets
 
-Served at `/static/brand/...` (embedded in the binary, cached for a year with `immutable`).
+Served at `/static/brand/...` (embedded in the binary; cached for a year with `immutable` when the URL carries `?v=`, otherwise for a day). This README and `concepts/` live in `docs/brand/` so they are not embedded or served.
 
 ## Active logo
 

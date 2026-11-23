@@ -19,8 +19,8 @@ import (
 //go:embed static
 var staticFiles embed.FS
 
-// staticHandler serves the embedded static/ directory at /static/ with long
-// cache headers. Directory listings are disabled.
+// staticHandler serves the embedded static/ directory at /static/ with cache headers
+// (long for ?v= URLs). Directory listings are disabled.
 func staticHandler() http.Handler {
 	sub, err := fs.Sub(staticFiles, "static")
 	if err != nil {
@@ -32,7 +32,13 @@ func staticHandler() http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		// Versioned URLs (?v=) never change; unversioned ones (manifest icons,
+		// favicon redirect) must be able to pick up new artwork.
+		if r.URL.Query().Has("v") {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			w.Header().Set("Cache-Control", "public, max-age=86400")
+		}
 		files.ServeHTTP(w, r)
 	})
 }
