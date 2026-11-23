@@ -1,7 +1,7 @@
-# Deployed by roost (https://github.com/nick-gerrard/roost): push to main -> live.
+# Deployed by roost (https://github.com/nick-gerrard/roost): when CI passes on main -> live.
 name = "scruples"
 subdomain = "scruples"
-on = "push"
+on = "ci-pass"
 
 [backend]                         # Go, backend-only: nginx sends / straight to the app
 runtime = "go"
