@@ -30,6 +30,7 @@ type gameRow struct {
 	CreatedBy         int64
 	DiscussionSeconds int
 	IncludeAI         bool
+	GuessAuthor       bool
 }
 
 type roundRow struct {
@@ -57,8 +58,8 @@ type playerRow struct {
 func scanGame(row *sql.Row) (*gameRow, error) {
 	g := &gameRow{}
 	var goal sql.NullInt64
-	var includeAI int
-	err := row.Scan(&g.ID, &g.Mode, &goal, &g.Status, &g.CreatedBy, &g.DiscussionSeconds, &includeAI)
+	var includeAI, guessAuthor int
+	err := row.Scan(&g.ID, &g.Mode, &goal, &g.Status, &g.CreatedBy, &g.DiscussionSeconds, &includeAI, &guessAuthor)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -67,18 +68,19 @@ func scanGame(row *sql.Row) (*gameRow, error) {
 	}
 	g.PointGoal = int(goal.Int64)
 	g.IncludeAI = includeAI != 0
+	g.GuessAuthor = guessAuthor != 0
 	return g, nil
 }
 
 func activeGame(q querier) (*gameRow, error) {
 	return scanGame(q.QueryRow(
-		`SELECT id, mode, point_goal, status, created_by, discussion_seconds, include_ai
+		`SELECT id, mode, point_goal, status, created_by, discussion_seconds, include_ai, guess_author
 		 FROM games WHERE status = 'active' ORDER BY id DESC LIMIT 1`))
 }
 
 func latestFinishedGame(q querier) (*gameRow, error) {
 	return scanGame(q.QueryRow(
-		`SELECT id, mode, point_goal, status, created_by, discussion_seconds, include_ai
+		`SELECT id, mode, point_goal, status, created_by, discussion_seconds, include_ai, guess_author
 		 FROM games WHERE status = 'finished' ORDER BY id DESC LIMIT 1`))
 }
 
@@ -256,6 +258,26 @@ type RoundView struct {
 	ChallengeIn        int
 	ChallengeTotal     int
 	ChallengeWaitingOn []string
+	Guess              *GuessPanel // nil unless "guess who wrote it" is on
+}
+
+// GuessPanel is the per-viewer "who wrote it?" state of an open round. It
+// never carries the card's author except as the viewer's own IsAuthor flag.
+type GuessPanel struct {
+	IsAuthor   bool
+	CanGuess   bool
+	MyGuessID  int64
+	Candidates []guessCandidate
+	Guessed    int
+}
+
+// GuessResult is one player's guess in a completed round.
+type GuessResult struct {
+	UserID      int64
+	Name        string
+	GuessedID   int64
+	GuessedName string
+	Correct     bool
 }
 
 // RoundSummaryView represents a completed round, used for both the live
@@ -279,6 +301,10 @@ type RoundSummaryView struct {
 	ChallengeOverturned bool
 	ChallengeAgree      int
 	ChallengeFlip       int
+	GuessShown          bool
+	AuthorID            int64
+	AuthorName          string
+	Guesses             []GuessResult
 	CompletedAt         string
 	DiscussionEndsAt    string
 	DiscussionEndsUnix  int64
@@ -300,19 +326,20 @@ type HistorySheetView struct {
 }
 
 type MeView struct {
-	ID            int64
-	IsAdmin       bool
-	IsHost        bool
-	Joined        bool
-	Eligible      bool
-	IsDrawer      bool
-	InitialVote   string
-	ChallengeVote string
-	AnswerSet     bool
-	CanDraw       bool
-	CanChallenge  bool
-	CanEnd        bool
-	CanToggleAI   bool
+	ID             int64
+	IsAdmin        bool
+	IsHost         bool
+	Joined         bool
+	Eligible       bool
+	IsDrawer       bool
+	InitialVote    string
+	ChallengeVote  string
+	AnswerSet      bool
+	CanDraw        bool
+	CanChallenge   bool
+	CanEnd         bool
+	CanToggleAI    bool
+	CanToggleGuess bool
 }
 
 type GameView struct {
@@ -325,6 +352,9 @@ type GameView struct {
 	Status            string
 	Classic           bool
 	IncludeAI         bool
+	GuessAuthor       bool
+	BestGuessers      []string
+	BestGuessCount    int
 	DiscussionSeconds int
 	DiscussionOptions []TimerOption
 	Me                MeView
@@ -455,7 +485,119 @@ func loadCompletedRounds(q querier, g *gameRow) ([]RoundSummaryView, error) {
 			}
 		}
 	}
-	return out, vrows.Err()
+	if err := vrows.Err(); err != nil {
+		return nil, err
+	}
+	vrows.Close() // single-connection pool: free it before the next query
+	ptrs := make([]*RoundSummaryView, len(out))
+	for i := range out {
+		ptrs[i] = &out[i]
+	}
+	if err := fillAuthorReveal(q, g, ptrs); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// fillAuthorReveal adds the card author and each player's author guess to
+// completed rounds. Only completed rounds are ever passed in, so the author is
+// never exposed earlier. Guesses sort correct-first, then by guesser name.
+func fillAuthorReveal(q querier, g *gameRow, rounds []*RoundSummaryView) error {
+	if len(rounds) == 0 {
+		return nil
+	}
+	byID := map[int64]*RoundSummaryView{}
+	for _, s := range rounds {
+		byID[s.ID] = s
+	}
+	arows, err := q.Query(
+		`SELECT r.id, c.author_id, u.username
+		 FROM rounds r JOIN cards c ON c.id = r.card_id JOIN users u ON u.id = c.author_id
+		 WHERE r.game_id = ? AND r.status = 'complete'`, g.ID)
+	if err != nil {
+		return err
+	}
+	defer arows.Close()
+	for arows.Next() {
+		var rid, aid int64
+		var name string
+		if err := arows.Scan(&rid, &aid, &name); err != nil {
+			return err
+		}
+		if s := byID[rid]; s != nil {
+			s.AuthorID, s.AuthorName = aid, name
+		}
+	}
+	if err := arows.Err(); err != nil {
+		return err
+	}
+	arows.Close()
+
+	grows, err := q.Query(
+		`SELECT ag.round_id, ag.user_id, gu.username, ag.guessed_author_id, au.username
+		 FROM author_guesses ag
+		 JOIN rounds r ON r.id = ag.round_id
+		 JOIN users gu ON gu.id = ag.user_id
+		 JOIN users au ON au.id = ag.guessed_author_id
+		 WHERE r.game_id = ? AND r.status = 'complete'
+		 ORDER BY ag.round_id, gu.username COLLATE NOCASE`, g.ID)
+	if err != nil {
+		return err
+	}
+	defer grows.Close()
+	for grows.Next() {
+		var rid int64
+		var gr GuessResult
+		if err := grows.Scan(&rid, &gr.UserID, &gr.Name, &gr.GuessedID, &gr.GuessedName); err != nil {
+			return err
+		}
+		if s := byID[rid]; s != nil {
+			gr.Correct = gr.GuessedID == s.AuthorID
+			s.Guesses = append(s.Guesses, gr)
+		}
+	}
+	if err := grows.Err(); err != nil {
+		return err
+	}
+	for _, s := range rounds {
+		sort.SliceStable(s.Guesses, func(i, j int) bool { return s.Guesses[i].Correct && !s.Guesses[j].Correct })
+		s.GuessShown = g.GuessAuthor || len(s.Guesses) > 0
+	}
+	return nil
+}
+
+// loadBestGuessers returns the players with the most correct author guesses
+// across the game's completed rounds (ties included), and that count. Empty
+// when nobody guessed right.
+func loadBestGuessers(q querier, gameID int64) ([]string, int, error) {
+	rows, err := q.Query(
+		`SELECT u.username, COUNT(*) AS n
+		 FROM author_guesses ag
+		 JOIN rounds r ON r.id = ag.round_id
+		 JOIN cards c ON c.id = r.card_id
+		 JOIN users u ON u.id = ag.user_id
+		 WHERE r.game_id = ? AND r.status = 'complete' AND ag.guessed_author_id = c.author_id
+		 GROUP BY u.id
+		 ORDER BY n DESC, u.username COLLATE NOCASE`, gameID)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var names []string
+	best := 0
+	for rows.Next() {
+		var name string
+		var n int
+		if err := rows.Scan(&name, &n); err != nil {
+			return nil, 0, err
+		}
+		if len(names) > 0 && n < best {
+			break
+		}
+		best = n
+		names = append(names, name)
+	}
+	return names, best, rows.Err()
 }
 
 func buildHistorySheet(db *sql.DB, tab string, selectedRoundID int64) (*HistorySheetView, error) {
@@ -585,6 +727,10 @@ func buildRoundSummary(q querier, g *gameRow, rd *roundRow, roundNum int, now ti
 	if err := vrows.Err(); err != nil {
 		return nil, err
 	}
+	vrows.Close() // single-connection pool: free it before the next query
+	if err := fillAuthorReveal(q, g, []*RoundSummaryView{s}); err != nil {
+		return nil, err
+	}
 
 	if endsAt, ok := parseTime(rd.DiscussionEndsAt); ok {
 		s.DiscussionEndsUnix = endsAt.Unix()
@@ -625,6 +771,10 @@ func computeStateVersion(v *GameView) string {
 	for _, w := range v.Winners {
 		fmt.Fprintf(h, "w=%s;", w)
 	}
+	fmt.Fprintf(h, "ga=%t,%t,%d;", v.GuessAuthor, v.Me.CanToggleGuess, v.BestGuessCount)
+	for _, b := range v.BestGuessers {
+		fmt.Fprintf(h, "bg=%s;", b)
+	}
 	if r := v.Round; r != nil {
 		fmt.Fprintf(h, "|r=%d,%s,%s,%d,%s,%s,%s,%d/%d,%d/%d,%s,%d/%d",
 			r.ID, r.Status, r.Card.Source, r.DrawerID, r.DrawerName, r.DrawerAnswer, r.FinalAnswer,
@@ -639,6 +789,12 @@ func computeStateVersion(v *GameView) string {
 		for _, cw := range r.ChallengeWaitingOn {
 			fmt.Fprintf(h, ",cw=%s", cw)
 		}
+		if gp := r.Guess; gp != nil {
+			fmt.Fprintf(h, ",gp=%t,%t,%d,%d", gp.IsAuthor, gp.CanGuess, gp.MyGuessID, gp.Guessed)
+			for _, c := range gp.Candidates {
+				fmt.Fprintf(h, ",gc=%d:%s:%s", c.ID, c.Name, c.AvatarVer)
+			}
+		}
 	}
 	if d := v.Discussion; d != nil {
 		fmt.Fprintf(h, "|disc=%d,%d,%s,%s,%s,%s,%d,%t,%s,%t,%d,%d",
@@ -651,6 +807,10 @@ func computeStateVersion(v *GameView) string {
 		}
 		for _, nv := range d.NoVotes {
 			fmt.Fprintf(h, ",n=%d:%s:%t", nv.UserID, nv.Name, nv.Correct)
+		}
+		fmt.Fprintf(h, ",au=%t:%d:%s", d.GuessShown, d.AuthorID, d.AuthorName)
+		for _, gr := range d.Guesses {
+			fmt.Fprintf(h, ",g=%d:%d:%t", gr.UserID, gr.GuessedID, gr.Correct)
 		}
 	}
 	sum := h.Sum(nil)
@@ -695,6 +855,7 @@ func buildViewInner(db *sql.DB, me *web.User, errMsg string) (*GameView, error) 
 	v.ID, v.Mode, v.PointGoal, v.Status = g.ID, g.Mode, g.PointGoal, g.Status
 	v.Classic = g.Mode == "classic"
 	v.IncludeAI = g.IncludeAI
+	v.GuessAuthor = g.GuessAuthor
 	v.DiscussionSeconds = g.DiscussionSeconds
 
 	if err := db.QueryRow(
@@ -729,12 +890,16 @@ func buildViewInner(db *sql.DB, me *web.User, errMsg string) (*GameView, error) 
 				v.Winners = append(v.Winners, p.Name)
 			}
 		}
+		if v.BestGuessers, v.BestGuessCount, err = loadBestGuessers(db, g.ID); err != nil {
+			return nil, err
+		}
 		return v, nil
 	}
 
 	v.Me.IsHost = isHost(g, me)
 	v.Me.CanEnd = v.Me.IsHost
 	v.Me.CanToggleAI = v.Me.IsHost
+	v.Me.CanToggleGuess = v.Me.IsHost
 
 	rd, err := latestRound(db, g.ID)
 	if err != nil {
@@ -870,6 +1035,32 @@ func buildViewInner(db *sql.DB, me *web.User, errMsg string) (*GameView, error) 
 				rv.ChallengeWaitingOn = append(rv.ChallengeWaitingOn, p.Name)
 			}
 		}
+	}
+
+	if g.GuessAuthor {
+		gp := &GuessPanel{}
+		var authorID int64
+		if err := db.QueryRow(`SELECT author_id FROM cards WHERE id = ?`, rd.CardID).Scan(&authorID); err != nil {
+			return nil, err
+		}
+		if err := db.QueryRow(`SELECT COUNT(*) FROM author_guesses WHERE round_id = ?`, rd.ID).Scan(&gp.Guessed); err != nil {
+			return nil, err
+		}
+		if v.Me.Eligible {
+			gp.IsAuthor = authorID == me.ID
+			gp.CanGuess = !gp.IsAuthor
+		}
+		if gp.CanGuess {
+			if err := db.QueryRow(
+				`SELECT guessed_author_id FROM author_guesses WHERE round_id = ? AND user_id = ?`, rd.ID, me.ID,
+			).Scan(&gp.MyGuessID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return nil, err
+			}
+			if gp.Candidates, err = guessCandidates(db, g.IncludeAI, me.ID); err != nil {
+				return nil, err
+			}
+		}
+		rv.Guess = gp
 	}
 
 	v.Me.CanChallenge = v.Classic && rd.Status == "revealed" && v.Me.Joined && !v.Me.IsDrawer

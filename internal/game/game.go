@@ -1,6 +1,7 @@
 package game
 
 import (
+	"errors"
 	"log"
 	"net/http"
 	"strconv"
@@ -112,7 +113,38 @@ func Routes(mux *http.ServeMux, app *web.App) {
 		} else if v := r.FormValue("include_ai"); v == "0" || strings.EqualFold(v, "false") {
 			includeAI = false
 		}
-		if err := doStart(app.DB, u, mode, pointGoal, discussionSeconds, includeAI); err != nil {
+		guessAuthor := false
+		if r.FormValue("guess_author_present") != "" {
+			guessAuthor = r.FormValue("guess_author") != ""
+		} else if v := r.FormValue("guess_author"); v == "1" || strings.EqualFold(v, "true") {
+			guessAuthor = true
+		}
+		if err := doStartGame(app.DB, u, mode, pointGoal, discussionSeconds, includeAI, guessAuthor); err != nil {
+			serverErr(w, err)
+			return
+		}
+		respond(app, w, r, "")
+	}))
+
+	mux.HandleFunc("POST /game/guess-author", app.RequireUser(func(w http.ResponseWriter, r *http.Request) {
+		if err := doToggleGuess(app.DB, app.CurrentUser(r)); err != nil {
+			serverErr(w, err)
+			return
+		}
+		respond(app, w, r, "")
+	}))
+
+	mux.HandleFunc("POST /game/guess", app.RequireUser(func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseInt(r.FormValue("author_id"), 10, 64)
+		if err != nil || id <= 0 {
+			http.Error(w, "bad author", http.StatusBadRequest)
+			return
+		}
+		if err := doGuess(app.DB, app.CurrentUser(r), id); err != nil {
+			if errors.Is(err, errGuessRejected) {
+				respond(app, w, r, "")
+				return
+			}
 			serverErr(w, err)
 			return
 		}

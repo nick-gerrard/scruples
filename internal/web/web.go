@@ -16,6 +16,9 @@ func (a *App) templateFuncs() template.FuncMap {
 	return template.FuncMap{
 		"hasPrefix": strings.HasPrefix,
 		"avatar":    a.Avatar,
+		// avatarv renders an avatar from an already-known version token,
+		// skipping the per-call avatar_path lookup (for lists of many users).
+		"avatarv": avatarHTML,
 	}
 }
 
