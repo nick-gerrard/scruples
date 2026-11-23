@@ -4,58 +4,61 @@
 {{$d := .Data}}
 <div class="space-y-8">
   <div>
-    <h1 class="text-3xl font-extrabold tracking-tight">Hall of Fame</h1>
-    <p class="mt-1 text-slate-400">All-time glory from classic games.</p>
+    <h1 class="page-title">Hall of Fame</h1>
+    <p class="page-sub">All-time glory from classic games.</p>
   </div>
 
   {{if and (not $d.Leaders) (not $d.Games)}}
-  <div class="rounded-2xl border border-slate-800 bg-slate-900 p-8 text-center text-slate-400">
-    No games have been won yet. Go play some Classic and claim the crown.
+  <div class="empty">
+    <img src="/static/brand/raccoon.svg?v=1" alt="" width="112" height="112" class="mx-auto h-28 w-28">
+    <p class="mt-4 text-lg font-semibold text-ink-dim">No winners yet</p>
+    <p class="mt-1 text-sm text-muted">No games have been won yet. Go play some Classic and claim the crown.</p>
+    <a href="/game" class="btn btn-primary btn-sm mt-5">Start playing</a>
   </div>
   {{else}}
 
   {{if $d.Leaders}}
-  <div>
-    <h2 class="mb-3 text-lg font-bold text-slate-200">Leaderboard</h2>
-    <div class="divide-y divide-slate-800 rounded-2xl border border-slate-800 bg-slate-900">
+  <section>
+    <h2 class="mb-3 text-lg font-bold text-ink">Leaderboard</h2>
+    <div class="divide-y divide-line overflow-hidden rounded-2xl border border-line bg-surface">
       {{range $i, $l := $d.Leaders}}
-      <div class="flex items-center justify-between px-4 py-3">
-        <span class="flex items-center gap-3">
-          <span class="w-6 text-center text-lg">{{if eq $i 0}}🥇{{else if eq $i 1}}🥈{{else if eq $i 2}}🥉{{else}}<span class="text-sm text-slate-500">{{$i}}</span>{{end}}</span>
-          <span class="font-semibold">{{$l.Name}}</span>
+      <div class="flex min-h-[52px] items-center justify-between gap-3 px-4 py-3">
+        <span class="flex min-w-0 items-center gap-3">
+          <span class="w-6 shrink-0 text-center text-lg">{{if eq $i 0}}🥇{{else if eq $i 1}}🥈{{else if eq $i 2}}🥉{{else}}<span class="text-sm text-muted-dim">{{$i}}</span>{{end}}</span>
+          <span class="truncate font-semibold">{{$l.Name}}</span>
         </span>
-        <span class="text-sm text-slate-400">{{$l.Wins}} win{{if ne $l.Wins 1}}s{{end}}</span>
+        <span class="shrink-0 text-sm text-muted">{{$l.Wins}} win{{if ne $l.Wins 1}}s{{end}}</span>
       </div>
       {{end}}
     </div>
-  </div>
+  </section>
   {{end}}
 
   {{if $d.Games}}
-  <div>
-    <h2 class="mb-3 text-lg font-bold text-slate-200">Past games</h2>
+  <section>
+    <h2 class="mb-3 text-lg font-bold text-ink">Past games</h2>
     <div class="space-y-3">
       {{range $d.Games}}
-      <div class="rounded-2xl border border-slate-800 bg-slate-900 p-4">
-        <div class="flex items-center justify-between text-xs text-slate-500">
+      <div class="card p-4">
+        <div class="flex items-center justify-between text-xs text-muted-dim">
           <span>{{.Date}}</span>
           <span>first to {{.PointGoal}}</span>
         </div>
-        <div class="mt-2 flex flex-wrap gap-2">
+        <div class="mt-2.5 flex flex-wrap gap-2">
           {{if .Winners}}
           {{range .Winners}}
-          <span class="inline-flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-3 py-1 text-sm text-amber-200">
-            👑 <span class="font-semibold">{{.Name}}</span> <span class="text-amber-300/70">· {{.Points}} pts</span>
+          <span class="inline-flex items-center gap-1.5 rounded-full border border-challenge-line/40 bg-challenge-line/10 px-3 py-1 text-sm text-challenge-pale">
+            👑 <span class="font-semibold">{{.Name}}</span> <span class="text-challenge-bright/70">· {{.Points}} pts</span>
           </span>
           {{end}}
           {{else}}
-          <span class="text-sm text-slate-500">No winner recorded.</span>
+          <span class="text-sm text-muted-dim">No winner recorded.</span>
           {{end}}
         </div>
       </div>
       {{end}}
     </div>
-  </div>
+  </section>
   {{end}}
 
   {{end}}

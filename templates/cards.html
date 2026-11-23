@@ -3,54 +3,49 @@
 {{define "content"}}
 <div class="space-y-6">
   <div class="flex items-start justify-between gap-3">
-    <div>
-      <h1 class="text-3xl font-extrabold tracking-tight">The Deck</h1>
-      <p class="mt-1 text-sm text-slate-400">You've written {{.Data.MyCount}} card{{if ne .Data.MyCount 1}}s{{end}}. The deck has {{.Data.TotalCount}}.</p>
+    <div class="min-w-0">
+      <h1 class="page-title">The Deck</h1>
+      <p class="page-sub">You've written {{.Data.MyCount}} card{{if ne .Data.MyCount 1}}s{{end}}. The deck has {{.Data.TotalCount}}.</p>
     </div>
-    <a href="/cards/new"
-       class="shrink-0 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500 active:scale-[0.97] sm:px-5 sm:py-3 sm:text-base">
-      + Write a card
-    </a>
+    <a href="/cards/new" class="btn btn-primary btn-sm shrink-0">+ Write a card</a>
   </div>
 
   {{if .Data.IsAdmin}}
   <div class="flex flex-wrap gap-2">
-    <a href="/cards" class="rounded-full border px-3 py-1.5 text-xs font-medium transition {{if eq .Data.Filter "all"}}border-indigo-500/60 bg-indigo-600/20 text-indigo-300{{else}}border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200{{end}}">All</a>
-    <a href="/cards?filter=mine" class="rounded-full border px-3 py-1.5 text-xs font-medium transition {{if eq .Data.Filter "mine"}}border-indigo-500/60 bg-indigo-600/20 text-indigo-300{{else}}border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200{{end}}">Mine</a>
-    <a href="/cards?filter=human" class="rounded-full border px-3 py-1.5 text-xs font-medium transition {{if eq .Data.Filter "human"}}border-indigo-500/60 bg-indigo-600/20 text-indigo-300{{else}}border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200{{end}}">Human</a>
-    <a href="/cards?filter=ai" class="rounded-full border px-3 py-1.5 text-xs font-medium transition {{if eq .Data.Filter "ai"}}border-indigo-500/60 bg-indigo-600/20 text-indigo-300{{else}}border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200{{end}}">AI</a>
-    <a href="/cards?filter=archived" class="rounded-full border px-3 py-1.5 text-xs font-medium transition {{if eq .Data.Filter "archived"}}border-indigo-500/60 bg-indigo-600/20 text-indigo-300{{else}}border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200{{end}}">Archived</a>
+    <a href="/cards" class="chip {{if eq .Data.Filter "all"}}chip-on{{else}}chip-off{{end}}">All</a>
+    <a href="/cards?filter=mine" class="chip {{if eq .Data.Filter "mine"}}chip-on{{else}}chip-off{{end}}">Mine</a>
+    <a href="/cards?filter=human" class="chip {{if eq .Data.Filter "human"}}chip-on{{else}}chip-off{{end}}">Human</a>
+    <a href="/cards?filter=ai" class="chip {{if eq .Data.Filter "ai"}}chip-on{{else}}chip-off{{end}}">AI</a>
+    <a href="/cards?filter=archived" class="chip {{if eq .Data.Filter "archived"}}chip-on{{else}}chip-off{{end}}">Archived</a>
   </div>
   {{end}}
 
   {{if not .Data.Cards}}
-  <div class="rounded-2xl border border-dashed border-slate-700 bg-slate-900/50 p-8 text-center">
+  <div class="empty">
+    <img src="/static/brand/raccoon.svg?v=1" alt="" width="112" height="112" class="mx-auto h-28 w-28">
     {{if .Data.IsAdmin}}
-    <p class="text-lg font-semibold text-slate-300">{{if eq .Data.Filter "archived"}}No archived cards.{{else}}No matching cards.{{end}}</p>
+    <p class="mt-4 text-lg font-semibold text-ink-dim">{{if eq .Data.Filter "archived"}}No archived cards.{{else}}No matching cards.{{end}}</p>
     {{else}}
-    <p class="text-lg font-semibold text-slate-300">You haven't written any cards yet.</p>
-    <p class="mt-2 text-sm text-slate-400">Your cards stay private here until they come up in a game. Add your first dilemma.</p>
-    <a href="/cards/new"
-       class="mt-5 inline-block rounded-xl bg-indigo-600 px-6 py-3 font-semibold text-white transition hover:bg-indigo-500 active:scale-[0.97]">
-      + Write a card
-    </a>
+    <p class="mt-4 text-lg font-semibold text-ink-dim">You haven't written any cards yet.</p>
+    <p class="mt-2 text-sm text-muted">Your cards stay private here until they come up in a game. Add your first dilemma.</p>
+    <a href="/cards/new" class="btn btn-primary btn-sm mt-5 px-6">+ Write a card</a>
     {{end}}
   </div>
   {{else}}
   <div class="space-y-4">
     {{range .Data.Cards}}
-    <article id="card-{{.ID}}" class="rounded-2xl border border-slate-800 bg-slate-900 p-5">
-      <p class="italic text-slate-300">{{.Circumstance}}</p>
+    <article id="card-{{.ID}}" class="card">
+      <p class="italic text-ink-dim">{{.Circumstance}}</p>
       <p class="mt-3 text-lg font-bold">{{.Question}}</p>
-      <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
-        <div class="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+      <div class="mt-4 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+        <div class="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-dim">
           {{if $.Data.IsAdmin}}
           <span>by {{.Author}} &middot; {{.CreatedAt}}</span>
           {{if eq .Source "ai"}}
-          <span class="rounded-full border border-violet-500/30 bg-violet-500/10 px-2 py-0.5 text-[11px] font-medium text-violet-300">AI · Claude</span>
+          <span class="badge-ai">AI · Claude</span>
           {{end}}
           {{if .Archived}}
-          <span class="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-300">Archived</span>
+          <span class="inline-flex items-center rounded-full border border-challenge-line/30 bg-challenge-line/10 px-2 py-0.5 text-[11px] font-medium text-challenge-bright">Archived</span>
           {{end}}
           {{else}}
           <span>{{.CreatedAt}}</span>
@@ -62,15 +57,12 @@
                   hx-post="/cards/{{.ID}}/restore"
                   hx-target="#card-{{.ID}}"
                   hx-swap="outerHTML swap:0.2s"
-                  class="rounded-lg bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-400 transition hover:bg-emerald-500/20 active:scale-[0.97]">
+                  class="btn btn-sm bg-yes-line/10 font-medium text-yes-soft hover:bg-yes-line/20">
             Restore
           </button>
           {{else}}
           {{if .CanEdit}}
-          <a href="/cards/{{.ID}}/edit"
-             class="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:bg-slate-700 active:scale-[0.97]">
-            Edit
-          </a>
+          <a href="/cards/{{.ID}}/edit" class="btn btn-sm btn-secondary font-medium">Edit</a>
           {{end}}
           {{if .CanDelete}}
           <button type="button"
@@ -78,7 +70,7 @@
                   hx-target="#card-{{.ID}}"
                   hx-swap="outerHTML swap:0.2s"
                   hx-confirm="Delete this card?"
-                  class="rounded-lg bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-400 transition hover:bg-red-500/20 active:scale-[0.97]">
+                  class="btn btn-sm bg-no-line/10 font-medium text-no-soft hover:bg-no-line/20">
             Delete
           </button>
           {{end}}

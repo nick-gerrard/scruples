@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="A raccoon giving you side-eye">
+  <title>The side-eye raccoon</title>
+  <!-- Mascot: concept 4. Transparent background. -->
+  <!-- Head and ears -->
+  <path d="M8.5 34L15 12.5L29 21.5Q32 21 35 21.5L49 12L55.5 34Q51 46.5 32 52Q13 46.5 8.5 34Z" fill="#5b5bd6" stroke="#5b5bd6" stroke-width="1.5" stroke-linejoin="round"/>
+  <path d="M17 17L17.5 25.5L24.5 21.5Z M47 16.5L46.5 25L39.5 21.5Z" fill="#1e293b"/>
+  <!-- Forehead stripe -->
+  <path d="M29.5 21.7Q32 21.2 34.5 21.7L36 29H28Z" fill="#eef2ff" stroke="#eef2ff" stroke-width="1.5" stroke-linejoin="round"/>
+  <!-- Bandit mask -->
+  <path d="M8.8 34.5Q8.5 28 17.5 29.2L32 31.5L46.5 29.2Q55.5 28 55.2 34.5Q49 43 38.5 41.5L32 38.5L25.5 41.5Q15 43 8.8 34.5Z" fill="#1e293b"/>
+  <!-- Muzzle -->
+  <path d="M24 42Q32 36 40 42Q43 52 32 52.5Q21 52 24 42Z" fill="#eef2ff"/>
+  <!-- Left eye: flat, unimpressed lid -->
+  <path d="M17 33.2L30.4 30.6A6.8 4.9 0 0 1 17 33.2Z" fill="#f8fafc"/>
+  <circle cx="26" cy="33.2" r="2.7" fill="#0f172a"/>
+  <!-- Right eye: wide, one raised brow -->
+  <circle cx="42" cy="33" r="6.4" fill="#f8fafc"/>
+  <circle cx="43.6" cy="33.3" r="2.6" fill="#0f172a"/>
+  <path d="M35.6 24.6Q42 20.4 48.4 24.4" fill="none" stroke="#eef2ff" stroke-width="1.8" stroke-linecap="round"/>
+  <!-- Nose -->
+  <path d="M29 40.6H35L32 44Z" fill="#1e293b" stroke="#1e293b" stroke-width="1.2" stroke-linejoin="round"/>
+  <!-- Amber glint -->
+  <path d="M57.5 14L58.8 17.2L62 18.5L58.8 19.8L57.5 23L56.2 19.8L53 18.5L56.2 17.2Z" fill="#f59e0b"/>
+</svg>

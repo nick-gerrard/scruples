@@ -106,3 +106,41 @@ func TestBotUserCannotLogin(t *testing.T) {
 		t.Fatalf("sessions count = %d, want 0", sessions)
 	}
 }
+
+func TestStaticAssets(t *testing.T) {
+	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+
+	mux := buildMux(web.NewApp(database), "")
+
+	for _, tc := range []struct {
+		path       string
+		wantStatus int
+		wantType   string
+		wantCache  string
+	}{
+		{"/static/brand/logo.svg?v=1", http.StatusOK, "image/svg+xml", "max-age=31536000, immutable"},
+		{"/static/brand/logo.svg", http.StatusOK, "image/svg+xml", "max-age=86400"},
+		{"/static/brand/favicon-32.png", http.StatusOK, "image/png", "max-age=86400"},
+		{"/static/brand/site.webmanifest", http.StatusOK, "", "max-age=86400"},
+		{"/static/brand/", http.StatusNotFound, "", ""},
+		{"/static/brand/missing.svg", http.StatusNotFound, "", ""},
+	} {
+		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != tc.wantStatus {
+			t.Errorf("GET %s status = %d, want %d", tc.path, rec.Code, tc.wantStatus)
+			continue
+		}
+		if tc.wantType != "" && !strings.HasPrefix(rec.Header().Get("Content-Type"), tc.wantType) {
+			t.Errorf("GET %s content-type = %q, want %q", tc.path, rec.Header().Get("Content-Type"), tc.wantType)
+		}
+		if got := rec.Header().Get("Cache-Control"); tc.wantCache != "" && !strings.Contains(got, tc.wantCache) {
+			t.Errorf("GET %s cache-control = %q, want %q", tc.path, got, tc.wantCache)
+		}
+	}
+}

@@ -1,9 +1,12 @@
 package main
 
 import (
+	"embed"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"scruples/internal/api"
 	"scruples/internal/auth"
@@ -13,6 +16,33 @@ import (
 	"scruples/internal/web"
 )
 
+//go:embed static
+var staticFiles embed.FS
+
+// staticHandler serves the embedded static/ directory at /static/ with cache headers
+// (long for ?v= URLs). Directory listings are disabled.
+func staticHandler() http.Handler {
+	sub, err := fs.Sub(staticFiles, "static")
+	if err != nil {
+		log.Fatalf("static files: %v", err)
+	}
+	files := http.StripPrefix("/static/", http.FileServerFS(sub))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/") {
+			http.NotFound(w, r)
+			return
+		}
+		// Versioned URLs (?v=) never change; unversioned ones (manifest icons,
+		// favicon redirect) must be able to pick up new artwork.
+		if r.URL.Query().Has("v") {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			w.Header().Set("Cache-Control", "public, max-age=86400")
+		}
+		files.ServeHTTP(w, r)
+	})
+}
+
 func buildMux(app *web.App, apiKey string) *http.ServeMux {
 	mux := http.NewServeMux()
 	auth.Routes(mux, app)
@@ -21,6 +51,11 @@ func buildMux(app *web.App, apiKey string) *http.ServeMux {
 	if apiKey != "" {
 		api.Routes(mux, app.DB, apiKey)
 	}
+
+	mux.Handle("GET /static/", staticHandler())
+	mux.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/static/brand/favicon-32.png", http.StatusMovedPermanently)
+	})
 
 	mux.HandleFunc("GET /{$}", app.RequireUser(func(w http.ResponseWriter, r *http.Request) {
 		app.Render(w, r, "home.html", nil)

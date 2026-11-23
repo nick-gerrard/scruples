@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Scruples">
+  <title>Scruples</title>
+  <!-- Active logo: concept 3, the crooked compass. Transparent background. -->
+  <!-- Indigo compass ring with a gap at north -->
+  <path d="M37.41 6.57A26 26 0 1 1 26.59 6.57" fill="none" stroke="#6366f1" stroke-width="4.5" stroke-linecap="round"/>
+  <!-- Cardinal ticks (3, 6, 9 o'clock) -->
+  <path d="M9.8 32H13.8M54.2 32H50.2M32 54.5V51" fill="none" stroke="#6366f1" stroke-width="2.5" stroke-linecap="round"/>
+  <!-- Amber star at north -->
+  <path d="M32 1.5L33.7 5.3L37.5 7L33.7 8.7L32 12.5L30.3 8.7L26.5 7L30.3 5.3Z" fill="#f59e0b"/>
+  <!-- The S: emerald YES arrow on top, rose NO arrow below -->
+  <g transform="translate(32 32) scale(0.9) translate(-32 -32)">
+  <g fill="#10b981" stroke="#10b981">
+    <path d="M30.52 31.37A8.5 8.5 0 1 1 40.21 20.8" fill="none" stroke-width="6.5"/>
+    <path d="M46.27 20.22L43.06 31.43L34.67 23.32Z" stroke="none"/>
+  </g>
+  <!-- Rose NO arrow: bottom bowl of the S (same shape, turned 180 degrees) -->
+  <g fill="#f43f5e" stroke="#f43f5e" transform="rotate(180 32 32)">
+    <path d="M30.52 31.37A8.5 8.5 0 1 1 40.21 20.8" fill="none" stroke-width="6.5"/>
+    <path d="M46.27 20.22L43.06 31.43L34.67 23.32Z" stroke="none"/>
+  </g>
+  </g>
+  <!-- Amber pivot with a knockout ring -->
+  <circle cx="32" cy="32" r="3.4" fill="#f59e0b" stroke="#020617" stroke-width="1.8"/>
+</svg>
