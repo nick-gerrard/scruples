@@ -106,7 +106,21 @@ func Routes(mux *http.ServeMux, app *web.App) {
 			}
 			discussionSeconds = n
 		}
-		if err := doStart(app.DB, u, mode, pointGoal, discussionSeconds); err != nil {
+		includeAI := true
+		if r.FormValue("include_ai_present") != "" {
+			includeAI = r.FormValue("include_ai") != ""
+		} else if v := r.FormValue("include_ai"); v == "0" || strings.EqualFold(v, "false") {
+			includeAI = false
+		}
+		if err := doStart(app.DB, u, mode, pointGoal, discussionSeconds, includeAI); err != nil {
+			serverErr(w, err)
+			return
+		}
+		respond(app, w, r, "")
+	}))
+
+	mux.HandleFunc("POST /game/ai-deck", app.RequireUser(func(w http.ResponseWriter, r *http.Request) {
+		if err := doToggleAI(app.DB, app.CurrentUser(r)); err != nil {
 			serverErr(w, err)
 			return
 		}

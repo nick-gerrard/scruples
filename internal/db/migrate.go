@@ -121,6 +121,13 @@ ALTER TABLE rounds ADD COLUMN completed_at TEXT;
 ALTER TABLE rounds ADD COLUMN discussion_ends_at TEXT;
 `,
 	},
+	{
+		Version: 6,
+		Name:    "ai_deck_toggle",
+		SQL: `
+ALTER TABLE games ADD COLUMN include_ai INTEGER NOT NULL DEFAULT 1;
+`,
+	},
 }
 
 func appliedVersions(db *sql.DB) (map[int]bool, error) {
@@ -142,6 +149,10 @@ func appliedVersions(db *sql.DB) (map[int]bool, error) {
 }
 
 func migrate(db *sql.DB) error {
+	return migrateWith(db, migrations)
+}
+
+func migrateWith(db *sql.DB, list []migration) error {
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS schema_migrations (
 			version INTEGER PRIMARY KEY,
@@ -156,7 +167,7 @@ func migrate(db *sql.DB) error {
 		return fmt.Errorf("read schema_migrations: %w", err)
 	}
 
-	for _, m := range migrations {
+	for _, m := range list {
 		if applied[m.Version] {
 			continue
 		}
