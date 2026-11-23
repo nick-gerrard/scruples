@@ -26,7 +26,7 @@ Stack: Go 1.26, SQLite via the pure-Go `modernc.org/sqlite` driver, server-rende
 - **Eligibility**: players whose `joined_at <= round.created_at` participate in the active round; mid-round joiners start on the next card.
 - **Classic mode**: the current drawer answers secretly (`POST /game/answer`) while eligible non-drawers guess (`POST /game/vote`). Once all are in, `maybeReveal` flips status to `revealed`. Any joined player can accept (`POST /game/next`), locking `final_answer = drawer_answer`, awarding +1 to matching initial voters, and finishing the game at `point_goal`. Any joined non-drawer can instead call bluff (`POST /game/challenge` -> `challenge`); eligible non-drawers re-vote (`POST /game/challenge/vote`), and a strict majority contradicting the drawer flips `final_answer` before scoring initial votes.
 - **Freeplay mode**: every eligible player (including the drawer) votes for themselves; `maybeReveal` shows tallies, and `POST /game/next` marks the round `complete`.
-- **Live updates**: `#game-state` in `templates/game.html` polls `GET /game/state` every 2s (`hx-trigger="every 2s"`). Every htmx game action returns the `game-state` fragment to swap into `#game-state` (non-htmx requests redirect 303 to `/game`).
+- **Live updates**: `#game-state` in `templates/game.html` polls `GET /game/state` every 2s (`hx-trigger="every 2s"`). Every valid htmx game action returns the `game-state` fragment (a bad value on `/game/answer`, `/game/vote` or `/game/challenge/vote` gets a plain 400) to swap into `#game-state` (non-htmx requests redirect 303 to `/game`).
 
 ## Running Locally & Testing
 
@@ -51,5 +51,5 @@ make build   # go build -o scruples .
 - **Never call `app.DB` inside an open transaction**: `db.Open` calls `SetMaxOpenConns(1)`, so querying `app.DB` while holding a `*sql.Tx` will deadlock. Pass the `*sql.Tx` (via `querier`) to any helper called inside a transaction.
 - **Keep handlers' state checks inside transactions**: check current game/round state and apply mutations in the same transaction to avoid check-then-act races.
 - **No secrets in git**: `*.db` files are gitignored; production `SCRUPLES_ADMIN_PASSWORD` lives in the server's roost env file, never in `deploy.toml` or source code.
-- **Schema changes**: schema changes will go through migrations (being added next; for now see `internal/db/db.go`).
+- **Schema changes**: schema changes go through migrations in `internal/db` (being added; until then the schema lives in `internal/db/db.go`).
 - **Branch & PR workflow**: always work on a branch and open a pull request. `main` is protected, and merging to `main` automatically deploys to production via `roost`.
