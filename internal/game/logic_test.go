@@ -706,6 +706,15 @@ func TestDiscussionZeroSkipsPhase(t *testing.T) {
 		t.Fatalf("doNext: %v", err)
 	}
 
+	_, rdDone, err := loadCurrent(d)
+	if err != nil {
+		t.Fatalf("loadCurrent after doNext: %v", err)
+	}
+	if rdDone.CompletedAt != "2026-11-23 19:00:00" || rdDone.DiscussionEndsAt != "2026-11-23 19:00:00" {
+		t.Fatalf("zero-duration timestamps = (completed=%q, ends=%q), want both 2026-11-23 19:00:00",
+			rdDone.CompletedAt, rdDone.DiscussionEndsAt)
+	}
+
 	view, err := buildView(d, alice, "")
 	if err != nil {
 		t.Fatalf("buildView: %v", err)
@@ -857,7 +866,7 @@ func TestGameState204AndRoutes(t *testing.T) {
 		return rec
 	}
 
-	// Full page GET /game renders cleanly with bottom sheet outside #game-state.
+	// Full page GET /game renders cleanly with bottom sheet outside #game-state and 401 reload handler.
 	reqFull := httptest.NewRequest(http.MethodGet, "/game", nil)
 	reqFull.AddCookie(aliceCookie)
 	recFull := httptest.NewRecorder()
@@ -869,11 +878,14 @@ func TestGameState204AndRoutes(t *testing.T) {
 	if !strings.Contains(fullBody, `id="history-sheet"`) || !strings.Contains(fullBody, `id="game-state-v"`) {
 		t.Fatalf("GET /game missing history-sheet or game-state-v")
 	}
+	if !strings.Contains(fullBody, `htmx:responseError`) || !strings.Contains(fullBody, `status === 401`) {
+		t.Fatalf("GET /game missing 401 session-expiry reload handler")
+	}
 
-	// Start game via POST /game/start with discussion_seconds=30.
+	// Start game via POST /game/start with discussion_seconds=30 and point_goal=2.
 	rec := doReq(http.MethodPost, "/game/start", aliceCookie, url.Values{
 		"mode":               {"classic"},
-		"point_goal":         {"5"},
+		"point_goal":         {"2"},
 		"discussion_seconds": {"30"},
 	})
 	if rec.Code != http.StatusOK {
@@ -906,13 +918,70 @@ func TestGameState204AndRoutes(t *testing.T) {
 		t.Fatalf("GET /game/state after change status = %d, want 200", rec200.Code)
 	}
 
-	// Play a round into discussion.
+	// Draw round 1 and verify version changes after a vote.
 	doReq(http.MethodPost, "/game/draw", aliceCookie, nil)
-	doReq(http.MethodPost, "/game/answer", aliceCookie, url.Values{"answer": {"yes"}})
+	vBeforeVote, err := buildView(d, alice, "")
+	if err != nil {
+		t.Fatalf("buildView before vote: %v", err)
+	}
 	doReq(http.MethodPost, "/game/vote", bobCookie, url.Values{"vote": {"yes"}})
-	recDisc := doReq(http.MethodPost, "/game/next", aliceCookie, nil)
+	recAfterVote := doReq(http.MethodGet, "/game/state?v="+vBeforeVote.StateVersion, aliceCookie, nil)
+	if recAfterVote.Code != http.StatusOK {
+		t.Fatalf("GET /game/state after vote status = %d, want 200", recAfterVote.Code)
+	}
+
+	// Drawer answers -> revealed; verify version changes after a challenge.
+	doReq(http.MethodPost, "/game/answer", aliceCookie, url.Values{"answer": {"yes"}})
+	vRevealed, err := buildView(d, alice, "")
+	if err != nil {
+		t.Fatalf("buildView revealed: %v", err)
+	}
+	doReq(http.MethodPost, "/game/challenge", bobCookie, nil)
+	recAfterChal := doReq(http.MethodGet, "/game/state?v="+vRevealed.StateVersion, aliceCookie, nil)
+	if recAfterChal.Code != http.StatusOK {
+		t.Fatalf("GET /game/state after challenge status = %d, want 200", recAfterChal.Code)
+	}
+
+	// Bob re-votes yes (agrees with drawer) -> round 1 completes -> discussion opens.
+	recDisc := doReq(http.MethodPost, "/game/challenge/vote", bobCookie, url.Values{"vote": {"yes"}})
 	if recDisc.Code != http.StatusOK || !strings.Contains(recDisc.Body.String(), "data-discussion-ring") {
-		t.Fatalf("expected discussion screen after /game/next, code=%d", recDisc.Code)
+		t.Fatalf("expected discussion screen after challenge resolves, code=%d", recDisc.Code)
+	}
+
+	// Soft-failure error banner (draw refused during discussion) must clear on the next poll.
+	recDrawErr := doReq(http.MethodPost, "/game/draw", bobCookie, nil)
+	if recDrawErr.Code != http.StatusOK || !strings.Contains(recDrawErr.Body.String(), "Discussion is still open.") {
+		t.Fatalf("expected error banner on draw during discussion, code=%d", recDrawErr.Code)
+	}
+	vWithErr, err := buildView(d, bob, "Discussion is still open.")
+	if err != nil {
+		t.Fatalf("buildView with error: %v", err)
+	}
+	recClearErr := doReq(http.MethodGet, "/game/state?v="+vWithErr.StateVersion, bobCookie, nil)
+	if recClearErr.Code != http.StatusOK {
+		t.Fatalf("GET /game/state after error banner status = %d, want 200", recClearErr.Code)
+	}
+	if strings.Contains(recClearErr.Body.String(), "Discussion is still open.") {
+		t.Fatalf("expected next poll to clear error banner")
+	}
+
+	// Non-host (bob) gets no effect from skip, extend, or duration via HTTP.
+	gBeforeNonHost, rdBeforeNonHost, err := loadCurrent(d)
+	if err != nil {
+		t.Fatalf("loadCurrent before non-host HTTP attempts: %v", err)
+	}
+	doReq(http.MethodPost, "/game/discussion/skip", bobCookie, nil)
+	doReq(http.MethodPost, "/game/discussion/extend", bobCookie, nil)
+	doReq(http.MethodPost, "/game/discussion/duration", bobCookie, url.Values{"discussion_seconds": {"120"}})
+	gAfterNonHost, rdAfterNonHost, err := loadCurrent(d)
+	if err != nil {
+		t.Fatalf("loadCurrent after non-host HTTP attempts: %v", err)
+	}
+	if gAfterNonHost.DiscussionSeconds != gBeforeNonHost.DiscussionSeconds {
+		t.Fatalf("non-host HTTP changed discussion_seconds from %d to %d", gBeforeNonHost.DiscussionSeconds, gAfterNonHost.DiscussionSeconds)
+	}
+	if rdAfterNonHost.DiscussionEndsAt != rdBeforeNonHost.DiscussionEndsAt {
+		t.Fatalf("non-host HTTP changed discussion_ends_at from %q to %q", rdBeforeNonHost.DiscussionEndsAt, rdAfterNonHost.DiscussionEndsAt)
 	}
 
 	// Version stays unchanged as seconds tick inside the discussion window -> 204.
@@ -960,6 +1029,21 @@ func TestGameState204AndRoutes(t *testing.T) {
 	recList := doReq(http.MethodGet, "/game/rounds?tab=list", bobCookie, nil)
 	if recList.Code != http.StatusOK || !strings.Contains(recList.Body.String(), "Rounds (1)") {
 		t.Fatalf("GET /game/rounds?tab=list status=%d unexpected body", recList.Code)
+	}
+
+	// Finish the game (round 2: bob draws, alice guesses right -> 1pt; end early or finish)
+	// and verify Game Over keeps the Last round pill and /game/rounds shows the winning card.
+	doReq(http.MethodPost, "/game/draw", bobCookie, nil)
+	doReq(http.MethodPost, "/game/answer", bobCookie, url.Values{"answer": {"no"}})
+	doReq(http.MethodPost, "/game/vote", aliceCookie, url.Values{"vote": {"no"}})
+	doReq(http.MethodPost, "/game/next", bobCookie, nil)
+	recEnd := doReq(http.MethodPost, "/game/end", aliceCookie, nil)
+	if recEnd.Code != http.StatusOK || !strings.Contains(recEnd.Body.String(), "Last round") {
+		t.Fatalf("expected Last round pill on game-over screen, code=%d", recEnd.Code)
+	}
+	recFinalHist := doReq(http.MethodGet, "/game/rounds", aliceCookie, nil)
+	if recFinalHist.Code != http.StatusOK || !strings.Contains(recFinalHist.Body.String(), "Question B?") {
+		t.Fatalf("GET /game/rounds after game over status=%d missing final round", recFinalHist.Code)
 	}
 }
 

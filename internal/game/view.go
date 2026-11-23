@@ -606,8 +606,8 @@ func buildRoundSummary(q querier, g *gameRow, rd *roundRow, roundNum int, now ti
 // excluded so ticking countdowns do not trigger re-renders.
 func computeStateVersion(v *GameView) string {
 	h := sha256.New()
-	fmt.Fprintf(h, "ng=%t;go=%t;id=%d;m=%s;pg=%d;st=%s;ds=%d;cr=%d;lc=%d;nd=%s|",
-		v.NoGame, v.GameOver, v.ID, v.Mode, v.PointGoal, v.Status,
+	fmt.Fprintf(h, "ng=%t;go=%t;err=%s;id=%d;m=%s;pg=%d;st=%s;ds=%d;cr=%d;lc=%d;nd=%s|",
+		v.NoGame, v.GameOver, v.Error, v.ID, v.Mode, v.PointGoal, v.Status,
 		v.DiscussionSeconds, v.CompletedRounds, v.LatestCompletedID, v.NextDrawerName)
 	fmt.Fprintf(h, "me=%d,%t,%t,%t,%t,%t,%s,%s,%t,%t,%t,%t|",
 		v.Me.ID, v.Me.IsAdmin, v.Me.IsHost, v.Me.Joined, v.Me.Eligible, v.Me.IsDrawer,

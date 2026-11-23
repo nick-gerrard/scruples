@@ -361,14 +361,17 @@
     {{end}}
   </div>
   {{if gt $d.CompletedRounds 0}}
-  <button type="button"
-          onclick="openHistorySheet()"
-          hx-get="/game/rounds"
-          hx-target="#history-sheet-body"
-          hx-swap="innerHTML"
-          class="w-full rounded-xl border border-slate-700 bg-slate-900 py-3 text-sm font-bold text-slate-200 active:scale-[0.99]">
-    View all {{$d.CompletedRounds}} round{{if ne $d.CompletedRounds 1}}s{{end}}
-  </button>
+  <div class="flex justify-center">
+    <button type="button"
+            onclick="openHistorySheet()"
+            hx-get="/game/rounds"
+            hx-target="#history-sheet-body"
+            hx-swap="innerHTML"
+            class="inline-flex min-h-[44px] items-center gap-2 rounded-full border border-indigo-500/40 bg-indigo-600/15 px-5 py-2 text-sm font-bold text-indigo-200 active:scale-[0.98]">
+      <span>Last round</span>
+      <span class="rounded-full bg-indigo-500/25 px-2 py-0.5 text-xs">{{$d.CompletedRounds}}</span>
+    </button>
+  </div>
   {{end}}
   {{if $d.Players}}
   <div class="divide-y divide-slate-800 rounded-2xl border border-slate-800 bg-slate-900">
