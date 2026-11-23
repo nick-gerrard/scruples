@@ -14,24 +14,34 @@ import (
 // funcs are helpers available in all templates.
 var funcs = template.FuncMap{
 	"hasPrefix": strings.HasPrefix,
-	"avatar":    avatar,
+	"avatar":    Avatar,
 }
 
 // User is the logged-in user attached to a request.
 type User struct {
-	ID       int64
-	Username string
-	IsAdmin  bool
+	ID         int64
+	Username   string
+	IsAdmin    bool
+	AvatarPath string
 }
 
 // App holds shared application dependencies.
 type App struct {
-	DB *sql.DB
+	DB         *sql.DB
+	UploadsDir string
 }
 
 // NewApp constructs an App around the given database.
 func NewApp(db *sql.DB) *App {
-	return &App{DB: db}
+	return &App{DB: db, UploadsDir: "uploads"}
+}
+
+// UploadsPath returns the configured uploads directory, defaulting to "uploads".
+func (a *App) UploadsPath() string {
+	if a.UploadsDir == "" {
+		return "uploads"
+	}
+	return a.UploadsDir
 }
 
 const sessionCookie = "scruples_session"
@@ -44,12 +54,12 @@ func (a *App) CurrentUser(r *http.Request) *User {
 	}
 	var u User
 	err = a.DB.QueryRow(`
-		SELECT u.id, u.username, u.is_admin
+		SELECT u.id, u.username, u.is_admin, COALESCE(u.avatar_path, '')
 		FROM sessions s
 		JOIN users u ON u.id = s.user_id
 		WHERE s.token = ? AND s.expires_at > datetime('now')`,
 		c.Value,
-	).Scan(&u.ID, &u.Username, &u.IsAdmin)
+	).Scan(&u.ID, &u.Username, &u.IsAdmin, &u.AvatarPath)
 	if err != nil {
 		return nil
 	}

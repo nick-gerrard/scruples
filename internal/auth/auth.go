@@ -73,8 +73,10 @@ type formData struct {
 }
 
 type accountData struct {
-	Error   string
-	Success string
+	Error         string
+	Success       string
+	AvatarError   string
+	AvatarSuccess string
 }
 
 const minPasswordLen = 6
@@ -227,4 +229,6 @@ func Routes(mux *http.ServeMux, app *web.App) {
 		app.DestroySession(w, r)
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 	})
+
+	avatarRoutes(mux, app)
 }

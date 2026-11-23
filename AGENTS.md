@@ -43,6 +43,7 @@ Environment variables (all optional locally):
 
 - `SCRUPLES_ADDR`: listen address (default `:8080`).
 - `SCRUPLES_DB`: SQLite file path (default `scruples.db`).
+- `SCRUPLES_UPLOADS`: directory for uploaded files such as profile pictures (default `uploads`, gitignored so it survives `roost` deploys).
 - `SCRUPLES_ADMIN_PASSWORD`: initial password for the seeded `nick` admin user (if unset when `nick` does not exist yet, a random 16-byte hex password is generated and logged once; set `SCRUPLES_RESET_ADMIN_PASSWORD=1` to force-reset on startup).
 - `SCRUPLES_API_KEY`: Bearer token enabling `/api/*` (omit to disable the API; in production this lives in the server's roost env file, never in `deploy.toml` or git).
 

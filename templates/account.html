@@ -6,6 +6,45 @@
   <p class="mt-1 text-sm text-slate-400">Signed in as <span class="font-medium text-slate-200">{{.User.Username}}</span></p>
 
   <div class="mt-6 rounded-2xl border border-slate-800 bg-slate-900 p-6">
+    <h2 class="mb-4 font-semibold">Profile picture</h2>
+
+    {{if .Data.AvatarError}}
+    <p class="mb-4 rounded-xl bg-red-500/10 px-4 py-3 text-sm text-red-400">{{.Data.AvatarError}}</p>
+    {{end}}
+    {{if .Data.AvatarSuccess}}
+    <p class="mb-4 rounded-xl bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400">{{.Data.AvatarSuccess}}</p>
+    {{end}}
+
+    <div class="mb-5 flex items-center gap-4">
+      <div class="rounded-full ring-2 ring-slate-700">
+        {{avatar .User.ID .User.Username 72}}
+      </div>
+      <div class="min-w-0 text-sm text-slate-400">
+        <p class="font-medium text-slate-200">{{.User.Username}}</p>
+        <p class="mt-0.5 text-xs">JPEG, PNG, or GIF up to 5 MB.</p>
+      </div>
+    </div>
+
+    <form method="post" action="/account/avatar" enctype="multipart/form-data" class="space-y-3">
+      <input type="file" name="avatar" accept="image/*" required
+             class="block w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2.5 text-sm text-slate-200 file:mr-3 file:rounded-lg file:border-0 file:bg-indigo-600 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-white hover:file:bg-indigo-500">
+      <button type="submit"
+              class="w-full rounded-xl bg-indigo-600 py-3 font-semibold text-white transition hover:bg-indigo-500 active:scale-[0.99]">
+        Upload picture
+      </button>
+    </form>
+
+    {{if .User.AvatarPath}}
+    <form method="post" action="/account/avatar/delete" class="mt-3">
+      <button type="submit"
+              class="w-full rounded-xl border border-slate-700 bg-slate-800 py-3 text-sm font-medium text-slate-300 transition hover:bg-slate-700 hover:text-white active:scale-[0.99]">
+        Remove picture
+      </button>
+    </form>
+    {{end}}
+  </div>
+
+  <div class="mt-6 rounded-2xl border border-slate-800 bg-slate-900 p-6">
     <h2 class="mb-4 font-semibold">Change password</h2>
 
     {{if .Data.Error}}
