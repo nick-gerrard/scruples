@@ -187,3 +187,21 @@ func GenerateAvatarSVG(id int64, username string) []byte {
 	b.WriteString(`</svg>`)
 	return b.Bytes()
 }
+
+// GenerateBotAvatarSVG returns a distinctive, fixed SVG emblem for bot users
+// (is_bot = 1, such as Claude) so AI-authored cards and bots stand out clearly.
+func GenerateBotAvatarSVG() []byte {
+	return []byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">` +
+		`<rect width="64" height="64" fill="#1e1b2e"/>` +
+		`<circle cx="32" cy="32" r="28" fill="none" stroke="#d97757" stroke-width="2" opacity="0.45"/>` +
+		`<line x1="32" y1="10" x2="32" y2="18" stroke="#f59e0b" stroke-width="3" stroke-linecap="round"/>` +
+		`<circle cx="32" cy="9" r="3.5" fill="#fde68a"/>` +
+		`<rect x="13" y="18" width="38" height="32" rx="11" fill="#d97757"/>` +
+		`<rect x="18" y="24" width="28" height="17" rx="6" fill="#0f172a"/>` +
+		`<path d="M25 27.5 L26.3 31.2 L30 32.5 L26.3 33.8 L25 37.5 L23.7 33.8 L20 32.5 L23.7 31.2 Z" fill="#fde68a"/>` +
+		`<path d="M39 27.5 L40.3 31.2 L44 32.5 L40.3 33.8 L39 37.5 L37.7 33.8 L34 32.5 L37.7 31.2 Z" fill="#fde68a"/>` +
+		`<rect x="26" y="44" width="12" height="2.6" rx="1.3" fill="#0f172a" opacity="0.75"/>` +
+		`<rect x="9" y="28" width="4" height="10" rx="2" fill="#f59e0b"/>` +
+		`<rect x="51" y="28" width="4" height="10" rx="2" fill="#f59e0b"/>` +
+		`</svg>`)
+}

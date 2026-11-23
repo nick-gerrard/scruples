@@ -210,7 +210,8 @@ func handleAvatarServe(w http.ResponseWriter, r *http.Request, app *web.App) {
 
 	var username string
 	var avatarPath sql.NullString
-	err = app.DB.QueryRow(`SELECT username, avatar_path FROM users WHERE id = ?`, id).Scan(&username, &avatarPath)
+	var isBot bool
+	err = app.DB.QueryRow(`SELECT username, avatar_path, is_bot FROM users WHERE id = ?`, id).Scan(&username, &avatarPath, &isBot)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		log.Printf("avatar serve: query user %d: %v", id, err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -227,6 +228,12 @@ func handleAvatarServe(w http.ResponseWriter, r *http.Request, app *web.App) {
 		if !errors.Is(readErr, os.ErrNotExist) {
 			log.Printf("avatar serve: read file %s: %v", avatarPath.String, readErr)
 		}
+	}
+
+	if err == nil && isBot {
+		svg := web.GenerateBotAvatarSVG()
+		serveCachedBytes(w, r, "image/svg+xml; charset=utf-8", svg, web.AvatarVersion(""))
+		return
 	}
 
 	svg := web.GenerateAvatarSVG(id, username)

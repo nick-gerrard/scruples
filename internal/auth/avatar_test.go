@@ -771,3 +771,29 @@ func TestAvatarServeAndDeleteFallback(t *testing.T) {
 		t.Fatalf("unauthenticated delete = (%d, %q), want (303, /login)", unauthRec.Code, unauthRec.Header().Get("Location"))
 	}
 }
+
+func TestAvatarServeBotUser(t *testing.T) {
+	app, mux, _, _ := setupAvatarTest(t)
+
+	var botID int64
+	if err := app.DB.QueryRow(`SELECT id FROM users WHERE is_bot = 1 AND username = 'Claude'`).Scan(&botID); err != nil {
+		t.Fatalf("find seeded Claude bot user: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/avatar/"+strconv.FormatInt(botID, 10)+"?v=gen", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /avatar/%d status = %d, want 200", botID, rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "image/svg+xml") {
+		t.Fatalf("bot Content-Type = %q, want image/svg+xml", ct)
+	}
+	if cc := rec.Header().Get("Cache-Control"); cc != "public, max-age=31536000, immutable" {
+		t.Fatalf("bot Cache-Control = %q, want public, max-age=31536000, immutable", cc)
+	}
+	if !bytes.Equal(rec.Body.Bytes(), web.GenerateBotAvatarSVG()) {
+		t.Fatal("bot user did not receive distinctive GenerateBotAvatarSVG()")
+	}
+}

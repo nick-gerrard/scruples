@@ -106,3 +106,31 @@ func TestAppAvatarHelperWithDB(t *testing.T) {
 		t.Fatalf("app.Avatar after upload = %q, want ?v=%s", after, wantV)
 	}
 }
+
+func TestGenerateBotAvatarSVGValidXML(t *testing.T) {
+	svg := GenerateBotAvatarSVG()
+	if !bytes.Equal(svg, GenerateBotAvatarSVG()) {
+		t.Fatal("GenerateBotAvatarSVG is not deterministic")
+	}
+	if bytes.Equal(svg, GenerateAvatarSVG(1, "Claude")) {
+		t.Fatal("bot avatar should be distinct from standard human generated avatar")
+	}
+
+	dec := xml.NewDecoder(bytes.NewReader(svg))
+	var root string
+	for {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("GenerateBotAvatarSVG invalid XML: %v", err)
+		}
+		if se, ok := tok.(xml.StartElement); ok && root == "" {
+			root = se.Name.Local
+		}
+	}
+	if root != "svg" {
+		t.Fatalf("GenerateBotAvatarSVG root = %q, want svg", root)
+	}
+}
