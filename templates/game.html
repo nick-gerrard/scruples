@@ -13,7 +13,7 @@
       <div class="text-base font-bold text-ink">Round history</div>
       <button type="button" onclick="closeHistorySheet()" aria-label="Close round history" class="inline-flex h-11 w-11 items-center justify-center rounded-xl text-lg text-muted active:bg-raised active:text-ink">✕</button>
     </div>
-    <div id="history-sheet-body" class="flex-1 overflow-y-auto px-4 pb-8 pt-4">
+    <div id="history-sheet-body" class="flex-1 overflow-y-auto px-4 pb-[calc(2rem+env(safe-area-inset-bottom))] pt-4">
       <div class="py-8 text-center text-sm text-muted-dim">Loading…</div>
     </div>
   </div>
@@ -123,7 +123,7 @@
   </label>
   <div>
     <label for="point_goal" class="block text-sm font-medium text-ink-dim">Point goal <span class="text-muted-dim">(classic only)</span></label>
-    <input type="number" id="point_goal" name="point_goal" value="5" min="1" max="100" class="mt-1 w-full rounded-xl border border-line-strong bg-page px-4 py-3 text-ink focus:border-primary-line focus:outline-none">
+    <input type="number" id="point_goal" name="point_goal" value="5" min="1" max="100" class="mt-1 min-h-[48px] w-full rounded-xl border border-line-strong bg-page px-4 py-3 text-ink transition focus:border-primary-line focus:outline-none focus:ring-2 focus:ring-primary-line/30">
   </div>
   <div>
     <div class="text-sm font-medium text-ink-dim">Discussion timer</div>
@@ -393,12 +393,12 @@
   {{if $d.Players}}
   <div class="divide-y divide-line rounded-2xl border border-line bg-surface">
     {{range $d.Players}}
-    <div class="flex items-center justify-between px-4 py-2.5 text-sm">
-      <span class="flex items-center gap-2 font-semibold">
+    <div class="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
+      <span class="flex min-w-0 items-center gap-2 font-semibold">
         {{avatar .ID .Name 24}}
-        <span>{{if .IsWinner}}👑 {{end}}{{.Name}}{{if .IsMe}} <span class="text-xs font-normal text-primary-soft">(you)</span>{{end}}</span>
+        <span class="truncate">{{if .IsWinner}}👑 {{end}}{{.Name}}{{if .IsMe}} <span class="text-xs font-normal text-primary-soft">(you)</span>{{end}}</span>
       </span>
-      {{if $d.Classic}}<span class="text-muted">{{.Points}} pts</span>{{end}}
+      {{if $d.Classic}}<span class="shrink-0 text-muted">{{.Points}} pts</span>{{end}}
     </div>
     {{end}}
   </div>
@@ -409,7 +409,7 @@
 <div class="space-y-5">
   <div class="flex flex-wrap items-center justify-between gap-2">
     <div class="flex flex-wrap items-center gap-2">
-      <span class="rounded-full bg-primary/20 px-3 py-1 text-xs font-bold uppercase tracking-wide text-primary-bright">{{if $d.Classic}}Classic{{else}}Free play{{end}}</span>
+      <span class="rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wide {{if $d.Classic}}bg-primary/20 text-primary-bright{{else}}bg-freeplay/20 text-freeplay-bright{{end}}">{{if $d.Classic}}Classic{{else}}Free play{{end}}</span>
       {{if $d.Classic}}<span class="text-xs text-muted">first to {{$d.PointGoal}}</span>{{end}}
     </div>
     <div class="flex flex-wrap items-center gap-2">
@@ -446,9 +446,9 @@
 
   <div class="flex flex-wrap gap-2">
     {{range $d.Players}}
-    <span class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-sm {{if .IsMe}}border-primary-line/60 bg-primary/15 text-primary-pale{{else}}border-line bg-surface text-ink-dim{{end}}{{if .IsNext}} ring-2 ring-freeplay-line/50{{end}}">
+    <span class="inline-flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-sm {{if .IsMe}}border-primary-line/60 bg-primary/15 text-primary-pale{{else}}border-line bg-surface text-ink-dim{{end}}{{if .IsNext}} ring-2 ring-freeplay-line/50{{end}}">
       {{avatar .ID .Name 20}}
-      <span class="font-semibold">{{.Name}}</span>{{if $d.Classic}}<span class="{{if .IsMe}}text-primary-bright{{else}}text-muted-dim{{end}}">· {{.Points}}</span>{{end}}
+      <span class="truncate font-semibold">{{.Name}}</span>{{if $d.Classic}}<span class="shrink-0 {{if .IsMe}}text-primary-bright{{else}}text-muted-dim{{end}}">· {{.Points}}</span>{{end}}
     </span>
     {{end}}
   </div>
@@ -599,7 +599,7 @@
   {{if $d.Me.IsHost}}
   <div class="space-y-3 pt-2">
     <details class="rounded-2xl border border-line bg-surface/70 px-3">
-      <summary class="flex min-h-[44px] cursor-pointer list-none items-center justify-between px-1 text-sm font-semibold text-muted">
+      <summary class="flex min-h-[44px] cursor-pointer list-none items-center justify-between px-1 text-sm font-semibold text-muted [&::-webkit-details-marker]:hidden">
         <span>Discussion timer</span>
         <span class="rounded-full bg-raised px-2.5 py-0.5 text-ink">{{if eq $d.DiscussionSeconds 0}}Off{{else}}{{$d.DiscussionSeconds}}s{{end}}</span>
       </summary>

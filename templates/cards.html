@@ -22,10 +22,10 @@
 
   {{if not .Data.Cards}}
   <div class="empty">
-    {{if .Data.IsAdmin}}
-    <p class="text-lg font-semibold text-ink-dim">{{if eq .Data.Filter "archived"}}No archived cards.{{else}}No matching cards.{{end}}</p>
-    {{else}}
     <img src="/static/brand/raccoon.svg?v=1" alt="" width="112" height="112" class="mx-auto h-28 w-28">
+    {{if .Data.IsAdmin}}
+    <p class="mt-4 text-lg font-semibold text-ink-dim">{{if eq .Data.Filter "archived"}}No archived cards.{{else}}No matching cards.{{end}}</p>
+    {{else}}
     <p class="mt-4 text-lg font-semibold text-ink-dim">You haven't written any cards yet.</p>
     <p class="mt-2 text-sm text-muted">Your cards stay private here until they come up in a game. Add your first dilemma.</p>
     <a href="/cards/new" class="btn btn-primary btn-sm mt-5 px-6">+ Write a card</a>

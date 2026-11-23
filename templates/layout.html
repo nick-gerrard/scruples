@@ -87,14 +87,14 @@
         <span class="text-lg font-extrabold tracking-tight text-ink">Scruples</span>
       </a>
       <nav class="ml-3 hidden flex-1 items-center gap-1 sm:flex" aria-label="Main">
-        <a href="/cards" class="nav-link {{if hasPrefix .Path "/cards"}}nav-link-on{{else}}nav-link-off{{end}}">Deck</a>
-        <a href="/game" class="nav-link {{if hasPrefix .Path "/game"}}nav-link-on{{else}}nav-link-off{{end}}">Play</a>
-        <a href="/winners" class="nav-link {{if hasPrefix .Path "/winners"}}nav-link-on{{else}}nav-link-off{{end}}">Winners</a>
+        <a href="/cards" class="nav-link {{if hasPrefix .Path "/cards"}}nav-link-on{{else}}nav-link-off{{end}}" {{if hasPrefix .Path "/cards"}}aria-current="page"{{end}}>Deck</a>
+        <a href="/game" class="nav-link {{if hasPrefix .Path "/game"}}nav-link-on{{else}}nav-link-off{{end}}" {{if hasPrefix .Path "/game"}}aria-current="page"{{end}}>Play</a>
+        <a href="/winners" class="nav-link {{if hasPrefix .Path "/winners"}}nav-link-on{{else}}nav-link-off{{end}}" {{if hasPrefix .Path "/winners"}}aria-current="page"{{end}}>Winners</a>
       </nav>
       <div class="relative ml-auto" id="user-menu">
         <button type="button" id="user-menu-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="user-menu-panel" aria-label="Account menu for {{.User.Username}}"
                 class="flex h-11 w-11 items-center justify-center rounded-full transition active:scale-95">
-          <span class="rounded-full ring-2 {{if hasPrefix .Path "/account"}}ring-primary-line{{else}}ring-line-strong{{end}}">{{avatar .User.ID .User.Username 34}}</span>
+          <span class="inline-flex rounded-full ring-2 {{if hasPrefix .Path "/account"}}ring-primary-line{{else}}ring-line-strong{{end}}">{{avatar .User.ID .User.Username 34}}</span>
         </button>
         <div id="user-menu-panel" role="menu" hidden class="anim-pop absolute right-0 top-full z-40 mt-2 w-56 rounded-2xl border border-line-strong bg-surface p-1.5 shadow-2xl shadow-black/50">
           <div class="truncate px-3 pb-2 pt-1.5 text-xs text-muted">Signed in as <span class="font-semibold text-ink">{{.User.Username}}</span></div>
