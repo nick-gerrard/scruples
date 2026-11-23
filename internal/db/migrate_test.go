@@ -214,3 +214,63 @@ func TestMigration4Discussion(t *testing.T) {
 		t.Fatalf("expected NULL completed_at/discussion_ends_at, got (%v, %v)", compAt, discEnd)
 	}
 }
+
+func TestMigrationsGapTolerance(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gaps.db")
+	d, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = d.Close() })
+
+	// Versions 1, 2, 3, 4, and 6 should be applied with 5 absent.
+	applied, err := appliedVersions(d)
+	if err != nil {
+		t.Fatalf("appliedVersions: %v", err)
+	}
+	for _, v := range []int{1, 2, 3, 4, 6} {
+		if !applied[v] {
+			t.Errorf("expected version %d to be applied", v)
+		}
+	}
+	if applied[5] {
+		t.Errorf("did not expect absent version 5 to be applied")
+	}
+
+	// Verify games.include_ai exists and defaults to 1.
+	res, err := d.Exec(`INSERT INTO users (username, password_hash) VALUES ('host', 'hash')`)
+	if err != nil {
+		t.Fatalf("insert host: %v", err)
+	}
+	uid, _ := res.LastInsertId()
+	res, err = d.Exec(`INSERT INTO games (mode, point_goal, created_by) VALUES ('classic', 5, ?)`, uid)
+	if err != nil {
+		t.Fatalf("insert game: %v", err)
+	}
+	gid, _ := res.LastInsertId()
+	var includeAI int
+	if err := d.QueryRow(`SELECT include_ai FROM games WHERE id = ?`, gid).Scan(&includeAI); err != nil {
+		t.Fatalf("select include_ai: %v", err)
+	}
+	if includeAI != 1 {
+		t.Fatalf("default include_ai = %d, want 1", includeAI)
+	}
+
+	// Later introducing an in-between version (5) must apply cleanly without re-running 6.
+	withGapFilled := append([]migration{}, migrations...)
+	withGapFilled = append(withGapFilled, migration{
+		Version: 5,
+		Name:    "later_backfill_test",
+		SQL:     `CREATE TABLE gap_backfill_check (id INTEGER PRIMARY KEY);`,
+	})
+	if err := migrateWith(d, withGapFilled); err != nil {
+		t.Fatalf("migrateWith gap filled: %v", err)
+	}
+	applied2, err := appliedVersions(d)
+	if err != nil {
+		t.Fatalf("appliedVersions after backfill: %v", err)
+	}
+	if !applied2[5] || !applied2[6] {
+		t.Fatalf("expected versions 5 and 6 to be applied, got %v", applied2)
+	}
+}

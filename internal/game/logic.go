@@ -70,7 +70,7 @@ func discussionOpen(rd *roundRow, now time.Time) bool {
 // doStart creates a new game if none is active. The creator auto-joins with
 // turn_order 1. Silently a no-op if a game is already running (race-safe:
 // the check and insert share one transaction, and the pool has one conn).
-func doStart(db *sql.DB, u *web.User, mode string, pointGoal, discussionSeconds int) error {
+func doStart(db *sql.DB, u *web.User, mode string, pointGoal, discussionSeconds int, includeAI bool) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return err
@@ -88,9 +88,13 @@ func doStart(db *sql.DB, u *web.User, mode string, pointGoal, discussionSeconds 
 	if mode == "classic" {
 		goal = pointGoal
 	}
+	incAI := 0
+	if includeAI {
+		incAI = 1
+	}
 	res, err := tx.Exec(
-		`INSERT INTO games (mode, point_goal, created_by, discussion_seconds) VALUES (?, ?, ?, ?)`,
-		mode, goal, u.ID, discussionSeconds)
+		`INSERT INTO games (mode, point_goal, created_by, discussion_seconds, include_ai) VALUES (?, ?, ?, ?, ?)`,
+		mode, goal, u.ID, discussionSeconds, incAI)
 	if err != nil {
 		return err
 	}
@@ -101,6 +105,34 @@ func doStart(db *sql.DB, u *web.User, mode string, pointGoal, discussionSeconds 
 	if _, err := tx.Exec(
 		`INSERT INTO game_players (game_id, user_id, turn_order) VALUES (?, ?, 1)`,
 		gid, u.ID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// doToggleAI flips include_ai on the active game. Only the game creator or an
+// admin may toggle it; otherwise it is a silent no-op.
+func doToggleAI(db *sql.DB, u *web.User) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	g, err := activeGame(tx)
+	if err != nil || g == nil {
+		return err
+	}
+	if u.ID != g.CreatedBy && !u.IsAdmin {
+		return nil
+	}
+	next := 1
+	if g.IncludeAI {
+		next = 0
+	}
+	if _, err := tx.Exec(
+		`UPDATE games SET include_ai = ? WHERE id = ? AND status = 'active'`,
+		next, g.ID); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -134,30 +166,35 @@ func doJoin(db *sql.DB, u *web.User) error {
 // pickCard chooses a random card for a new round. Preference order:
 // unused in this game and (classic) not by the drawer, then any unused,
 // then (classic) any not by the drawer, then any card at all.
-// Returns 0 if there are no cards.
-func pickCard(q querier, gameID, drawerID int64, mode string) (int64, error) {
+// Always excludes archived cards, and excludes AI cards when includeAI is false.
+// Returns 0 if there are no eligible cards.
+func pickCard(q querier, gameID, drawerID int64, mode string, includeAI bool) (int64, error) {
 	type cand struct {
 		sql  string
 		args []any
+	}
+	baseWhere := "archived_at IS NULL"
+	if !includeAI {
+		baseWhere += " AND source != 'ai'"
 	}
 	var cands []cand
 	if mode == "classic" {
 		cands = append(cands, cand{
 			`SELECT id FROM cards
-			 WHERE archived_at IS NULL
+			 WHERE ` + baseWhere + `
 			   AND id NOT IN (SELECT card_id FROM rounds WHERE game_id = ?) AND author_id != ?
 			 ORDER BY RANDOM() LIMIT 1`, []any{gameID, drawerID}})
 	}
 	cands = append(cands, cand{
 		`SELECT id FROM cards
-		 WHERE archived_at IS NULL
+		 WHERE ` + baseWhere + `
 		   AND id NOT IN (SELECT card_id FROM rounds WHERE game_id = ?)
 		 ORDER BY RANDOM() LIMIT 1`, []any{gameID}})
 	if mode == "classic" {
 		cands = append(cands, cand{
-			`SELECT id FROM cards WHERE archived_at IS NULL AND author_id != ? ORDER BY RANDOM() LIMIT 1`, []any{drawerID}})
+			`SELECT id FROM cards WHERE ` + baseWhere + ` AND author_id != ? ORDER BY RANDOM() LIMIT 1`, []any{drawerID}})
 	}
-	cands = append(cands, cand{`SELECT id FROM cards WHERE archived_at IS NULL ORDER BY RANDOM() LIMIT 1`, nil})
+	cands = append(cands, cand{`SELECT id FROM cards WHERE ` + baseWhere + ` ORDER BY RANDOM() LIMIT 1`, nil})
 
 	for _, c := range cands {
 		var id int64
@@ -208,7 +245,7 @@ func doDraw(db *sql.DB, u *web.User) (string, error) {
 	if g.Mode == "classic" && nextDrawerIDFor(players, rd) != u.ID {
 		return "", nil
 	}
-	cardID, err := pickCard(tx, g.ID, u.ID, g.Mode)
+	cardID, err := pickCard(tx, g.ID, u.ID, g.Mode, g.IncludeAI)
 	if err != nil {
 		return "", err
 	}

@@ -29,6 +29,7 @@ type gameRow struct {
 	Status            string
 	CreatedBy         int64
 	DiscussionSeconds int
+	IncludeAI         bool
 }
 
 type roundRow struct {
@@ -56,7 +57,8 @@ type playerRow struct {
 func scanGame(row *sql.Row) (*gameRow, error) {
 	g := &gameRow{}
 	var goal sql.NullInt64
-	err := row.Scan(&g.ID, &g.Mode, &goal, &g.Status, &g.CreatedBy, &g.DiscussionSeconds)
+	var includeAI int
+	err := row.Scan(&g.ID, &g.Mode, &goal, &g.Status, &g.CreatedBy, &g.DiscussionSeconds, &includeAI)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -64,18 +66,19 @@ func scanGame(row *sql.Row) (*gameRow, error) {
 		return nil, err
 	}
 	g.PointGoal = int(goal.Int64)
+	g.IncludeAI = includeAI != 0
 	return g, nil
 }
 
 func activeGame(q querier) (*gameRow, error) {
 	return scanGame(q.QueryRow(
-		`SELECT id, mode, point_goal, status, created_by, discussion_seconds
+		`SELECT id, mode, point_goal, status, created_by, discussion_seconds, include_ai
 		 FROM games WHERE status = 'active' ORDER BY id DESC LIMIT 1`))
 }
 
 func latestFinishedGame(q querier) (*gameRow, error) {
 	return scanGame(q.QueryRow(
-		`SELECT id, mode, point_goal, status, created_by, discussion_seconds
+		`SELECT id, mode, point_goal, status, created_by, discussion_seconds, include_ai
 		 FROM games WHERE status = 'finished' ORDER BY id DESC LIMIT 1`))
 }
 
@@ -213,6 +216,7 @@ func nextDrawerIDFor(players []playerRow, last *roundRow) int64 {
 type CardView struct {
 	Circumstance string
 	Question     string
+	Source       string
 }
 
 type PlayerView struct {
@@ -308,6 +312,7 @@ type MeView struct {
 	CanDraw       bool
 	CanChallenge  bool
 	CanEnd        bool
+	CanToggleAI   bool
 }
 
 type GameView struct {
@@ -319,6 +324,7 @@ type GameView struct {
 	PointGoal         int
 	Status            string
 	Classic           bool
+	IncludeAI         bool
 	DiscussionSeconds int
 	DiscussionOptions []TimerOption
 	Me                MeView
@@ -343,7 +349,7 @@ func formatCountdown(secs int) string {
 // order (Round 1, Round 2, ...) along with its card, votes, and challenge outcome.
 func loadCompletedRounds(q querier, g *gameRow) ([]RoundSummaryView, error) {
 	rows, err := q.Query(
-		`SELECT r.id, c.circumstance, c.question,
+		`SELECT r.id, c.circumstance, c.question, c.source,
 		        r.drawer_id, du.username,
 		        r.drawer_answer, r.final_answer,
 		        r.challenger_id, cu.username,
@@ -367,7 +373,7 @@ func loadCompletedRounds(q querier, g *gameRow) ([]RoundSummaryView, error) {
 		var drawerAns, finalAns, chalName, compAt, discEnd sql.NullString
 		var chalID sql.NullInt64
 		if err := rows.Scan(
-			&s.ID, &s.Card.Circumstance, &s.Card.Question,
+			&s.ID, &s.Card.Circumstance, &s.Card.Question, &s.Card.Source,
 			&s.DrawerID, &s.DrawerName,
 			&drawerAns, &finalAns,
 			&chalID, &chalName,
@@ -514,8 +520,8 @@ func buildRoundSummary(q querier, g *gameRow, rd *roundRow, roundNum int, now ti
 		CompletedAt:      rd.CompletedAt,
 		DiscussionEndsAt: rd.DiscussionEndsAt,
 	}
-	if err := q.QueryRow(`SELECT circumstance, question FROM cards WHERE id = ?`, rd.CardID).
-		Scan(&s.Card.Circumstance, &s.Card.Question); err != nil {
+	if err := q.QueryRow(`SELECT circumstance, question, source FROM cards WHERE id = ?`, rd.CardID).
+		Scan(&s.Card.Circumstance, &s.Card.Question, &s.Card.Source); err != nil {
 		return nil, err
 	}
 	if err := q.QueryRow(`SELECT username FROM users WHERE id = ?`, rd.DrawerID).Scan(&s.DrawerName); err != nil {
@@ -606,13 +612,13 @@ func buildRoundSummary(q querier, g *gameRow, rd *roundRow, roundNum int, now ti
 // excluded so ticking countdowns do not trigger re-renders.
 func computeStateVersion(v *GameView) string {
 	h := sha256.New()
-	fmt.Fprintf(h, "ng=%t;go=%t;err=%s;id=%d;m=%s;pg=%d;st=%s;ds=%d;cr=%d;lc=%d;nd=%s|",
-		v.NoGame, v.GameOver, v.Error, v.ID, v.Mode, v.PointGoal, v.Status,
+	fmt.Fprintf(h, "ng=%t;go=%t;err=%s;id=%d;m=%s;pg=%d;st=%s;ai=%t;ds=%d;cr=%d;lc=%d;nd=%s|",
+		v.NoGame, v.GameOver, v.Error, v.ID, v.Mode, v.PointGoal, v.Status, v.IncludeAI,
 		v.DiscussionSeconds, v.CompletedRounds, v.LatestCompletedID, v.NextDrawerName)
-	fmt.Fprintf(h, "me=%d,%t,%t,%t,%t,%t,%s,%s,%t,%t,%t,%t|",
+	fmt.Fprintf(h, "me=%d,%t,%t,%t,%t,%t,%s,%s,%t,%t,%t,%t,%t|",
 		v.Me.ID, v.Me.IsAdmin, v.Me.IsHost, v.Me.Joined, v.Me.Eligible, v.Me.IsDrawer,
 		v.Me.InitialVote, v.Me.ChallengeVote, v.Me.AnswerSet,
-		v.Me.CanDraw, v.Me.CanChallenge, v.Me.CanEnd)
+		v.Me.CanDraw, v.Me.CanChallenge, v.Me.CanEnd, v.Me.CanToggleAI)
 	for _, p := range v.Players {
 		fmt.Fprintf(h, "p=%d,%s,%d,%t,%t,%t;", p.ID, p.Name, p.Points, p.IsNext, p.IsWinner, p.IsMe)
 	}
@@ -620,8 +626,8 @@ func computeStateVersion(v *GameView) string {
 		fmt.Fprintf(h, "w=%s;", w)
 	}
 	if r := v.Round; r != nil {
-		fmt.Fprintf(h, "|r=%d,%s,%d,%s,%s,%s,%d/%d,%d/%d,%s,%d/%d",
-			r.ID, r.Status, r.DrawerID, r.DrawerName, r.DrawerAnswer, r.FinalAnswer,
+		fmt.Fprintf(h, "|r=%d,%s,%s,%d,%s,%s,%s,%d/%d,%d/%d,%s,%d/%d",
+			r.ID, r.Status, r.Card.Source, r.DrawerID, r.DrawerName, r.DrawerAnswer, r.FinalAnswer,
 			r.VotesIn, r.VotesTotal, r.YesCount, r.NoCount,
 			r.ChallengerName, r.ChallengeIn, r.ChallengeTotal)
 		for _, wn := range r.WaitingOn {
@@ -635,8 +641,8 @@ func computeStateVersion(v *GameView) string {
 		}
 	}
 	if d := v.Discussion; d != nil {
-		fmt.Fprintf(h, "|disc=%d,%d,%s,%s,%s,%d,%t,%s,%t,%d,%d",
-			d.ID, d.Number, d.DrawerAnswer, d.FinalAnswer,
+		fmt.Fprintf(h, "|disc=%d,%d,%s,%s,%s,%s,%d,%t,%s,%t,%d,%d",
+			d.ID, d.Number, d.Card.Source, d.DrawerAnswer, d.FinalAnswer,
 			d.DiscussionEndsAt, d.DiscussionTotalSecs,
 			d.Challenged, d.ChallengerName, d.ChallengeOverturned,
 			d.ChallengeAgree, d.ChallengeFlip)
@@ -688,6 +694,7 @@ func buildViewInner(db *sql.DB, me *web.User, errMsg string) (*GameView, error) 
 	}
 	v.ID, v.Mode, v.PointGoal, v.Status = g.ID, g.Mode, g.PointGoal, g.Status
 	v.Classic = g.Mode == "classic"
+	v.IncludeAI = g.IncludeAI
 	v.DiscussionSeconds = g.DiscussionSeconds
 
 	if err := db.QueryRow(
@@ -727,6 +734,7 @@ func buildViewInner(db *sql.DB, me *web.User, errMsg string) (*GameView, error) 
 
 	v.Me.IsHost = isHost(g, me)
 	v.Me.CanEnd = v.Me.IsHost
+	v.Me.CanToggleAI = v.Me.IsHost
 
 	rd, err := latestRound(db, g.ID)
 	if err != nil {
@@ -769,8 +777,8 @@ func buildViewInner(db *sql.DB, me *web.User, errMsg string) (*GameView, error) 
 	}
 
 	rv := &RoundView{ID: rd.ID, Classic: v.Classic, Status: rd.Status, DrawerID: rd.DrawerID, DrawerName: names[rd.DrawerID]}
-	if err := db.QueryRow(`SELECT circumstance, question FROM cards WHERE id = ?`, rd.CardID).
-		Scan(&rv.Card.Circumstance, &rv.Card.Question); err != nil {
+	if err := db.QueryRow(`SELECT circumstance, question, source FROM cards WHERE id = ?`, rd.CardID).
+		Scan(&rv.Card.Circumstance, &rv.Card.Question, &rv.Card.Source); err != nil {
 		return nil, err
 	}
 

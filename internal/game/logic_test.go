@@ -61,7 +61,7 @@ func TestDoStart(t *testing.T) {
 	alice := createUser(t, d, "alice")
 	bob := createUser(t, d, "bob")
 
-	if err := doStart(d, alice, "classic", 7, 60); err != nil {
+	if err := doStart(d, alice, "classic", 7, 60, true); err != nil {
 		t.Fatalf("doStart: %v", err)
 	}
 
@@ -72,7 +72,7 @@ func TestDoStart(t *testing.T) {
 	if g == nil {
 		t.Fatal("expected active game, got nil")
 	}
-	if g.Mode != "classic" || g.PointGoal != 7 || g.CreatedBy != alice.ID || g.DiscussionSeconds != 60 {
+	if g.Mode != "classic" || g.PointGoal != 7 || g.CreatedBy != alice.ID || g.DiscussionSeconds != 60 || !g.IncludeAI {
 		t.Fatalf("unexpected game: %+v", g)
 	}
 
@@ -85,7 +85,7 @@ func TestDoStart(t *testing.T) {
 	}
 
 	// Second start while active must be a no-op.
-	if err := doStart(d, bob, "freeplay", 0, 30); err != nil {
+	if err := doStart(d, bob, "freeplay", 0, 30, false); err != nil {
 		t.Fatalf("second doStart: %v", err)
 	}
 	var count int
@@ -110,7 +110,7 @@ func TestDoJoin(t *testing.T) {
 	bob := createUser(t, d, "bob")
 	carol := createUser(t, d, "carol")
 
-	if err := doStart(d, alice, "classic", 5, 60); err != nil {
+	if err := doStart(d, alice, "classic", 5, 60, true); err != nil {
 		t.Fatalf("doStart: %v", err)
 	}
 	if err := doJoin(d, bob); err != nil {
@@ -156,7 +156,7 @@ func TestDoDraw(t *testing.T) {
 	alice := createUser(t, d, "alice")
 	bob := createUser(t, d, "bob")
 
-	if err := doStart(d, alice, "classic", 5, 60); err != nil {
+	if err := doStart(d, alice, "classic", 5, 60, true); err != nil {
 		t.Fatalf("doStart: %v", err)
 	}
 	if err := doJoin(d, bob); err != nil {
@@ -213,7 +213,7 @@ func TestMaybeReveal(t *testing.T) {
 		carol := createUser(t, d, "carol")
 		createCard(t, d, bob.ID, "A dilemma", "Do it?")
 
-		if err := doStart(d, alice, "classic", 5, 60); err != nil {
+		if err := doStart(d, alice, "classic", 5, 60, true); err != nil {
 			t.Fatalf("doStart: %v", err)
 		}
 		if err := doJoin(d, bob); err != nil {
@@ -271,7 +271,7 @@ func TestMaybeReveal(t *testing.T) {
 		bob := createUser(t, d, "bob")
 		createCard(t, d, alice.ID, "A dilemma", "Do it?")
 
-		if err := doStart(d, alice, "freeplay", 0, 60); err != nil {
+		if err := doStart(d, alice, "freeplay", 0, 60, true); err != nil {
 			t.Fatalf("doStart: %v", err)
 		}
 		if err := doJoin(d, bob); err != nil {
@@ -317,7 +317,7 @@ func TestDoNextClassicScoringAndFinish(t *testing.T) {
 	createCard(t, d, bob.ID, "Scene 2", "Q2?")
 	createCard(t, d, carol.ID, "Scene 3", "Q3?")
 
-	if err := doStart(d, alice, "classic", 2, 0); err != nil {
+	if err := doStart(d, alice, "classic", 2, 0, true); err != nil {
 		t.Fatalf("doStart: %v", err)
 	}
 	if err := doJoin(d, bob); err != nil {
@@ -425,7 +425,7 @@ func TestPickCardExcludesArchived(t *testing.T) {
 	alice := createUser(t, d, "alice")
 	bob := createUser(t, d, "bob")
 
-	if err := doStart(d, alice, "classic", 5, 60); err != nil {
+	if err := doStart(d, alice, "classic", 5, 60, true); err != nil {
 		t.Fatalf("doStart: %v", err)
 	}
 	if err := doJoin(d, bob); err != nil {
@@ -453,7 +453,7 @@ func TestPickCardExcludesArchived(t *testing.T) {
 	// and even after it has been used in a round (forcing deepest fallback),
 	// pickCard must never return an archived card.
 	for i := range 10 {
-		got, err := pickCard(d, g.ID, alice.ID, "classic")
+		got, err := pickCard(d, g.ID, alice.ID, "classic", true)
 		if err != nil {
 			t.Fatalf("pickCard classic #%d: %v", i, err)
 		}
@@ -471,7 +471,7 @@ func TestPickCardExcludesArchived(t *testing.T) {
 	}
 	for _, mode := range []string{"classic", "freeplay"} {
 		for i := range 10 {
-			got, err := pickCard(d, g.ID, alice.ID, mode)
+			got, err := pickCard(d, g.ID, alice.ID, mode, true)
 			if err != nil {
 				t.Fatalf("pickCard fallback %s #%d: %v", mode, i, err)
 			}
@@ -485,7 +485,7 @@ func TestPickCardExcludesArchived(t *testing.T) {
 	if _, err := d.Exec(`UPDATE cards SET archived_at = datetime('now') WHERE id = ?`, onlyActive); err != nil {
 		t.Fatalf("archive last card: %v", err)
 	}
-	got, err := pickCard(d, g.ID, alice.ID, "classic")
+	got, err := pickCard(d, g.ID, alice.ID, "classic", true)
 	if err != nil {
 		t.Fatalf("pickCard all archived: %v", err)
 	}
@@ -544,7 +544,7 @@ func TestDiscussionWindowAndDrawRefusal(t *testing.T) {
 	createCard(t, d, bob.ID, "S2", "Q2?")
 	createCard(t, d, carol.ID, "S3", "Q3?")
 
-	if err := doStart(d, alice, "classic", 5, 60); err != nil {
+	if err := doStart(d, alice, "classic", 5, 60, true); err != nil {
 		t.Fatalf("doStart: %v", err)
 	}
 	if err := doJoin(d, bob); err != nil {
@@ -683,7 +683,7 @@ func TestDiscussionZeroSkipsPhase(t *testing.T) {
 	createCard(t, d, alice.ID, "S1", "Q1?")
 	createCard(t, d, bob.ID, "S2", "Q2?")
 
-	if err := doStart(d, alice, "freeplay", 0, 0); err != nil {
+	if err := doStart(d, alice, "freeplay", 0, 0, true); err != nil {
 		t.Fatalf("doStart: %v", err)
 	}
 	if err := doJoin(d, bob); err != nil {
@@ -739,7 +739,7 @@ func TestDiscussionPermissionsHostAndAdmin(t *testing.T) {
 	admin := createAdmin(t, d, "admin")
 	createCard(t, d, guest.ID, "S1", "Q1?")
 
-	if err := doStart(d, host, "classic", 5, 60); err != nil {
+	if err := doStart(d, host, "classic", 5, 60, true); err != nil {
 		t.Fatalf("doStart: %v", err)
 	}
 	if err := doJoin(d, guest); err != nil {
@@ -1062,7 +1062,7 @@ func TestLoadCompletedRoundsHistory(t *testing.T) {
 	_ = c2
 	_ = c3
 
-	if err := doStart(d, alice, "classic", 10, 0); err != nil {
+	if err := doStart(d, alice, "classic", 10, 0, true); err != nil {
 		t.Fatalf("doStart: %v", err)
 	}
 	if err := doJoin(d, bob); err != nil {
@@ -1134,5 +1134,337 @@ func TestLoadCompletedRoundsHistory(t *testing.T) {
 	}
 	if len(history[1].NoVotes) != 2 || !history[1].NoVotes[0].Correct || !history[1].NoVotes[1].Correct {
 		t.Fatalf("round 2 no votes should both be correct after flip: %+v", history[1].NoVotes)
+	}
+}
+
+func TestPickCardIncludeAI(t *testing.T) {
+	d := openTestDB(t)
+	alice := createUser(t, d, "alice")
+
+	var claudeID int64
+	if err := d.QueryRow(`SELECT id FROM users WHERE username = 'Claude'`).Scan(&claudeID); err != nil {
+		t.Fatalf("select Claude: %v", err)
+	}
+
+	if err := doStart(d, alice, "classic", 5, 60, false); err != nil {
+		t.Fatalf("doStart: %v", err)
+	}
+	g, err := activeGame(d)
+	if err != nil {
+		t.Fatalf("activeGame: %v", err)
+	}
+	if g.IncludeAI {
+		t.Fatal("expected IncludeAI=false")
+	}
+
+	// Insert AI cards authored by Claude (would normally be preferred over Alice's own card)
+	// plus one human card authored by Alice.
+	res, err := d.Exec(
+		`INSERT INTO cards (author_id, circumstance, question, source) VALUES (?, 'AI 1', 'AI Q1?', 'ai')`,
+		claudeID,
+	)
+	if err != nil {
+		t.Fatalf("insert AI card 1: %v", err)
+	}
+	aiCard1, _ := res.LastInsertId()
+	if _, err := d.Exec(
+		`INSERT INTO cards (author_id, circumstance, question, source) VALUES (?, 'AI 2', 'AI Q2?', 'ai')`,
+		claudeID,
+	); err != nil {
+		t.Fatalf("insert AI card 2: %v", err)
+	}
+	humanCard := createCard(t, d, alice.ID, "Human scene", "Human Q?")
+
+	// With includeAI=false, Alice must get the human card (never an AI card).
+	for i := range 10 {
+		got, err := pickCard(d, g.ID, alice.ID, "classic", false)
+		if err != nil {
+			t.Fatalf("pickCard includeAI=false #%d: %v", i, err)
+		}
+		if got != humanCard {
+			t.Fatalf("pickCard includeAI=false #%d = %d, want humanCard %d", i, got, humanCard)
+		}
+	}
+
+	// Mark the human card used to force deepest fallback in both modes.
+	if _, err := d.Exec(
+		`INSERT INTO rounds (game_id, card_id, drawer_id, status) VALUES (?, ?, ?, 'complete')`,
+		g.ID, humanCard, alice.ID,
+	); err != nil {
+		t.Fatalf("insert round: %v", err)
+	}
+	for _, mode := range []string{"classic", "freeplay"} {
+		for i := range 10 {
+			got, err := pickCard(d, g.ID, alice.ID, mode, false)
+			if err != nil {
+				t.Fatalf("pickCard fallback %s includeAI=false #%d: %v", mode, i, err)
+			}
+			if got != humanCard {
+				t.Fatalf("pickCard fallback %s includeAI=false #%d = %d, want humanCard %d", mode, i, got, humanCard)
+			}
+		}
+	}
+
+	// Also exercise fallback 3 (classic used, author_id != drawerID): Bob's human card is already used
+	// while unused AI cards exist; includeAI=false must pick Bob's used human card, never an AI card.
+	bob := createUser(t, d, "bob")
+	bobHumanCard := createCard(t, d, bob.ID, "Bob human", "Bob Q?")
+	if _, err := d.Exec(
+		`INSERT INTO rounds (game_id, card_id, drawer_id, status) VALUES (?, ?, ?, 'complete')`,
+		g.ID, bobHumanCard, alice.ID,
+	); err != nil {
+		t.Fatalf("insert round for bob card: %v", err)
+	}
+	for i := range 10 {
+		got, err := pickCard(d, g.ID, alice.ID, "classic", false)
+		if err != nil {
+			t.Fatalf("pickCard fallback3 includeAI=false #%d: %v", i, err)
+		}
+		if got != bobHumanCard {
+			t.Fatalf("pickCard fallback3 includeAI=false #%d = %d, want bobHumanCard %d", i, got, bobHumanCard)
+		}
+	}
+
+	// With includeAI=true, an unused non-drawer AI card IS picked.
+	got, err := pickCard(d, g.ID, alice.ID, "classic", true)
+	if err != nil {
+		t.Fatalf("pickCard includeAI=true: %v", err)
+	}
+	if got == humanCard || got == bobHumanCard || got == 0 {
+		t.Fatalf("pickCard includeAI=true = %d, want an AI card (e.g. %d)", got, aiCard1)
+	}
+
+	// If only AI cards remain and includeAI=false, deck appears empty (0).
+	if _, err := d.Exec(`UPDATE cards SET archived_at = datetime('now') WHERE id IN (?, ?)`, humanCard, bobHumanCard); err != nil {
+		t.Fatalf("archive human cards: %v", err)
+	}
+	got, err = pickCard(d, g.ID, alice.ID, "classic", false)
+	if err != nil {
+		t.Fatalf("pickCard only AI with includeAI=false: %v", err)
+	}
+	if got != 0 {
+		t.Fatalf("pickCard only AI with includeAI=false = %d, want 0", got)
+	}
+}
+
+func TestPostToggleAIHTTP(t *testing.T) {
+	d := openTestDB(t)
+	host := createUser(t, d, "host")
+	player := createUser(t, d, "player")
+	admin := createUser(t, d, "admin")
+	if _, err := d.Exec(`UPDATE users SET is_admin = 1 WHERE id = ?`, admin.ID); err != nil {
+		t.Fatalf("promote admin: %v", err)
+	}
+
+	if err := doStart(d, host, "classic", 5, 60, true); err != nil {
+		t.Fatalf("doStart: %v", err)
+	}
+	if err := doJoin(d, player); err != nil {
+		t.Fatalf("doJoin: %v", err)
+	}
+
+	app := web.NewApp(d)
+	mux := http.NewServeMux()
+	Routes(mux, app)
+
+	cookieFor := func(uid int64) *http.Cookie {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/login", nil)
+		if err := app.CreateSession(rec, req, uid); err != nil {
+			t.Fatalf("CreateSession(%d): %v", uid, err)
+		}
+		return rec.Result().Cookies()[0]
+	}
+
+	postToggle := func(c *http.Cookie) int {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/game/ai-deck", nil)
+		req.AddCookie(c)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	// Non-host POST /game/ai-deck is a no-op.
+	if code := postToggle(cookieFor(player.ID)); code != http.StatusSeeOther {
+		t.Fatalf("player POST /game/ai-deck status = %d, want 303", code)
+	}
+	g, err := activeGame(d)
+	if err != nil || !g.IncludeAI {
+		t.Fatalf("expected include_ai to remain true after non-host POST, got g=%+v err=%v", g, err)
+	}
+
+	// Host POST /game/ai-deck flips include_ai to false.
+	if code := postToggle(cookieFor(host.ID)); code != http.StatusSeeOther {
+		t.Fatalf("host POST /game/ai-deck status = %d, want 303", code)
+	}
+	g, _ = activeGame(d)
+	if g.IncludeAI {
+		t.Fatal("expected include_ai to flip false after host POST")
+	}
+
+	// Admin POST /game/ai-deck flips include_ai back to true.
+	if code := postToggle(cookieFor(admin.ID)); code != http.StatusSeeOther {
+		t.Fatalf("admin POST /game/ai-deck status = %d, want 303", code)
+	}
+	g, _ = activeGame(d)
+	if !g.IncludeAI {
+		t.Fatal("expected include_ai to flip true after admin POST")
+	}
+}
+
+func TestDoToggleAI(t *testing.T) {
+	d := openTestDB(t)
+	host := createUser(t, d, "host")
+	player := createUser(t, d, "player")
+	admin := createUser(t, d, "admin")
+	admin.IsAdmin = true
+
+	if err := doStart(d, host, "classic", 5, 60, true); err != nil {
+		t.Fatalf("doStart: %v", err)
+	}
+	if err := doJoin(d, player); err != nil {
+		t.Fatalf("doJoin: %v", err)
+	}
+
+	// Regular non-host player cannot toggle.
+	if err := doToggleAI(d, player); err != nil {
+		t.Fatalf("doToggleAI player: %v", err)
+	}
+	g, err := activeGame(d)
+	if err != nil {
+		t.Fatalf("activeGame: %v", err)
+	}
+	if !g.IncludeAI {
+		t.Fatal("non-host player must not be able to toggle include_ai")
+	}
+
+	// Host flips it OFF.
+	if err := doToggleAI(d, host); err != nil {
+		t.Fatalf("doToggleAI host: %v", err)
+	}
+	g, _ = activeGame(d)
+	if g.IncludeAI {
+		t.Fatal("expected host to flip include_ai to false")
+	}
+
+	// Admin flips it back ON.
+	if err := doToggleAI(d, admin); err != nil {
+		t.Fatalf("doToggleAI admin: %v", err)
+	}
+	g, _ = activeGame(d)
+	if !g.IncludeAI {
+		t.Fatal("expected admin to flip include_ai back to true")
+	}
+}
+
+func TestToggleAIChangesStateVersionAndAIBadgeInDiscussionAndHistory(t *testing.T) {
+	t.Chdir("../..")
+	d := openTestDB(t)
+	_ = freezeClock(t, time.Date(2026, 11, 23, 23, 0, 0, 0, time.UTC))
+
+	app := web.NewApp(d)
+	mux := http.NewServeMux()
+	Routes(mux, app)
+
+	alice := createUser(t, d, "alice")
+	bob := createUser(t, d, "bob")
+	var claudeID int64
+	if err := d.QueryRow(`SELECT id FROM users WHERE username = 'Claude'`).Scan(&claudeID); err != nil {
+		t.Fatalf("select Claude: %v", err)
+	}
+	if _, err := d.Exec(
+		`INSERT INTO cards (author_id, circumstance, question, source) VALUES (?, 'AI dilemma scene', 'AI dilemma Q?', 'ai')`,
+		claudeID,
+	); err != nil {
+		t.Fatalf("insert AI card: %v", err)
+	}
+
+	aliceCookie := sessionCookieFor(t, app, alice.ID)
+	bobCookie := sessionCookieFor(t, app, bob.ID)
+
+	if err := doStart(d, alice, "classic", 5, 60, true); err != nil {
+		t.Fatalf("doStart: %v", err)
+	}
+	if err := doJoin(d, bob); err != nil {
+		t.Fatalf("doJoin: %v", err)
+	}
+
+	// Capture Bob's StateVersion before host toggles AI deck.
+	vBefore, err := buildView(d, bob, "")
+	if err != nil {
+		t.Fatalf("buildView before toggle: %v", err)
+	}
+	if !vBefore.IncludeAI {
+		t.Fatal("expected IncludeAI=true initially")
+	}
+
+	// Host toggles AI deck OFF via HTTP -> Bob's StateVersion must change and /game/state?v=old must return 200 (not 204).
+	reqToggle := httptest.NewRequest(http.MethodPost, "/game/ai-deck", nil)
+	reqToggle.Header.Set("HX-Request", "true")
+	reqToggle.AddCookie(aliceCookie)
+	recToggle := httptest.NewRecorder()
+	mux.ServeHTTP(recToggle, reqToggle)
+	if recToggle.Code != http.StatusOK {
+		t.Fatalf("POST /game/ai-deck status = %d, want 200", recToggle.Code)
+	}
+
+	vAfter, err := buildView(d, bob, "")
+	if err != nil {
+		t.Fatalf("buildView after toggle: %v", err)
+	}
+	if vAfter.IncludeAI {
+		t.Fatal("expected IncludeAI=false after host toggle")
+	}
+	if vAfter.StateVersion == vBefore.StateVersion {
+		t.Fatalf("StateVersion did not change after toggling include_ai (%q)", vAfter.StateVersion)
+	}
+
+	reqPoll := httptest.NewRequest(http.MethodGet, "/game/state?v="+vBefore.StateVersion, nil)
+	reqPoll.Header.Set("HX-Request", "true")
+	reqPoll.AddCookie(bobCookie)
+	recPoll := httptest.NewRecorder()
+	mux.ServeHTTP(recPoll, reqPoll)
+	if recPoll.Code != http.StatusOK {
+		t.Fatalf("GET /game/state after AI toggle status = %d, want 200 (got 204 stale cache)", recPoll.Code)
+	}
+
+	// Toggle AI deck back ON, draw the AI card, complete the round, and verify "AI · Claude"
+	// appears on the live discussion screen and in both tabs of the Last round sheet.
+	if err := doToggleAI(d, alice); err != nil {
+		t.Fatalf("toggle back ON: %v", err)
+	}
+	if msg, err := doDraw(d, alice); err != nil || msg != "" {
+		t.Fatalf("doDraw AI card: msg=%q err=%v", msg, err)
+	}
+	g, rd, _ := loadCurrent(d)
+	_, _ = d.Exec(`UPDATE rounds SET drawer_answer = 'yes' WHERE id = ?`, rd.ID)
+	_, _ = d.Exec(`INSERT INTO votes (round_id, user_id, phase, vote) VALUES (?, ?, 'initial', 'yes')`, rd.ID, bob.ID)
+	_ = maybeReveal(d, g, rd.ID)
+	if err := doNext(d, alice); err != nil {
+		t.Fatalf("doNext: %v", err)
+	}
+
+	// Discussion screen renders "AI · Claude".
+	reqDisc := httptest.NewRequest(http.MethodGet, "/game/state", nil)
+	reqDisc.Header.Set("HX-Request", "true")
+	reqDisc.AddCookie(bobCookie)
+	recDisc := httptest.NewRecorder()
+	mux.ServeHTTP(recDisc, reqDisc)
+	if recDisc.Code != http.StatusOK || !strings.Contains(recDisc.Body.String(), "AI · Claude") {
+		t.Fatalf("discussion screen missing AI · Claude chip (code=%d)", recDisc.Code)
+	}
+
+	// Last round sheet (detail + list tabs) renders "AI · Claude".
+	for _, path := range []string{"/game/rounds", "/game/rounds?tab=list"} {
+		reqSheet := httptest.NewRequest(http.MethodGet, path, nil)
+		reqSheet.Header.Set("HX-Request", "true")
+		reqSheet.AddCookie(bobCookie)
+		recSheet := httptest.NewRecorder()
+		mux.ServeHTTP(recSheet, reqSheet)
+		if recSheet.Code != http.StatusOK || !strings.Contains(recSheet.Body.String(), "AI · Claude") {
+			t.Errorf("GET %s missing AI · Claude chip (code=%d)", path, recSheet.Code)
+		}
 	}
 }
