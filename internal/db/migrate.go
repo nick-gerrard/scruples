@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 )
 
@@ -9,6 +10,7 @@ type migration struct {
 	Version int
 	Name    string
 	SQL     string
+	Check   func(*sql.Tx) error
 }
 
 var migrations = []migration{
@@ -85,9 +87,19 @@ CREATE INDEX IF NOT EXISTS cards_active ON cards(archived_at);
 	{
 		Version: 3,
 		Name:    "api_claude_audit",
+		Check: func(tx *sql.Tx) error {
+			var exists int
+			if err := tx.QueryRow(`SELECT COUNT(*) FROM users WHERE username = 'Claude' COLLATE NOCASE`).Scan(&exists); err != nil {
+				return err
+			}
+			if exists > 0 {
+				return errors.New("cannot seed bot user 'Claude': a non-bot user with that username already exists")
+			}
+			return nil
+		},
 		SQL: `
 ALTER TABLE users ADD COLUMN is_bot INTEGER NOT NULL DEFAULT 0;
-INSERT OR IGNORE INTO users (username, password_hash, is_admin, is_bot) VALUES ('Claude', '!', 0, 1);
+INSERT INTO users (username, password_hash, is_admin, is_bot) VALUES ('Claude', '!', 0, 1);
 CREATE TABLE IF NOT EXISTS api_audit (
   id INTEGER PRIMARY KEY,
   at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -142,6 +154,12 @@ func migrate(db *sql.DB) error {
 		tx, err := db.Begin()
 		if err != nil {
 			return fmt.Errorf("begin migration %d (%s): %w", m.Version, m.Name, err)
+		}
+		if m.Check != nil {
+			if err := m.Check(tx); err != nil {
+				_ = tx.Rollback()
+				return fmt.Errorf("apply migration %d (%s): %w", m.Version, m.Name, err)
+			}
 		}
 		if _, err := tx.Exec(m.SQL); err != nil {
 			_ = tx.Rollback()

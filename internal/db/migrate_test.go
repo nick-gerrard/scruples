@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -124,5 +125,35 @@ func TestMigrationsPreMigrationDB(t *testing.T) {
 	}
 	if pwHash != "!" || isAdmin != 0 || isBot != 1 {
 		t.Fatalf("Claude user = (hash=%q, admin=%d, bot=%d), want ('!', 0, 1)", pwHash, isAdmin, isBot)
+	}
+}
+
+func TestMigration3FailsIfNonBotClaudeExists(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "claude_conflict.db")
+
+	raw, err := sql.Open("sqlite", "file:"+path+"?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)")
+	if err != nil {
+		t.Fatalf("sql.Open raw: %v", err)
+	}
+	if _, err := raw.Exec(migrations[0].SQL); err != nil {
+		raw.Close()
+		t.Fatalf("exec baseline: %v", err)
+	}
+	// Insert a pre-existing human user named "claude" (lowercase to test NOCASE).
+	if _, err := raw.Exec(`INSERT INTO users (username, password_hash) VALUES ('claude', 'human-hash')`); err != nil {
+		raw.Close()
+		t.Fatalf("insert human claude: %v", err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close raw DB: %v", err)
+	}
+
+	d, err := Open(path)
+	if err == nil {
+		d.Close()
+		t.Fatal("expected migration 3 to fail when a non-bot 'claude' user exists, got nil")
+	}
+	if !strings.Contains(err.Error(), "Claude") || !strings.Contains(err.Error(), "non-bot") {
+		t.Fatalf("expected clear error mentioning Claude and non-bot, got: %v", err)
 	}
 }

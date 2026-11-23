@@ -1,16 +1,25 @@
 package api
 
 import (
+	"crypto/sha256"
 	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
 	"strings"
 	"unicode/utf8"
+)
+
+const (
+	maxBodyBytes     = 1 << 20
+	maxBatchOps      = 200
+	defaultListLimit = 500
+	maxListLimit     = 1000
 )
 
 // Card is the JSON representation of a dilemma card.
@@ -22,6 +31,11 @@ type Card struct {
 	Author       string  `json:"author"`
 	CreatedAt    string  `json:"created_at"`
 	ArchivedAt   *string `json:"archived_at"`
+}
+
+type dryRunCardResponse struct {
+	Card
+	DryRun bool `json:"dry_run"`
 }
 
 type listResponse struct {
@@ -56,6 +70,7 @@ type batchRequest struct {
 }
 
 type batchResponse struct {
+	DryRun  bool   `json:"dry_run,omitempty"`
 	Results []Card `json:"results"`
 }
 
@@ -91,6 +106,14 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	}
 }
 
+func writeCardResult(w http.ResponseWriter, status int, card Card, dry bool) {
+	if dry {
+		writeJSON(w, status, dryRunCardResponse{Card: card, DryRun: true})
+		return
+	}
+	writeJSON(w, status, card)
+}
+
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
@@ -106,10 +129,11 @@ func handleErr(w http.ResponseWriter, err error) {
 }
 
 func requireBearer(apiKey string, h http.HandlerFunc) http.HandlerFunc {
-	keyBytes := []byte(apiKey)
+	keyHash := sha256.Sum256([]byte(apiKey))
 	return func(w http.ResponseWriter, r *http.Request) {
 		token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if !ok || subtle.ConstantTimeCompare([]byte(token), keyBytes) != 1 {
+		tokenHash := sha256.Sum256([]byte(token))
+		if !ok || subtle.ConstantTimeCompare(tokenHash[:], keyHash[:]) != 1 {
 			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
@@ -122,10 +146,20 @@ func isDryRun(r *http.Request) bool {
 	return v == "1" || strings.EqualFold(v, "true")
 }
 
-func decodeJSON(r *http.Request, dst any) error {
+func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			return &httpError{status: http.StatusRequestEntityTooLarge, msg: "request body too large"}
+		}
 		return badRequest("invalid JSON body")
+	}
+	var extra any
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		return badRequest("unexpected trailing data after JSON body")
 	}
 	return nil
 }
@@ -209,9 +243,10 @@ func applyCreate(tx *sql.Tx, req createRequest) (Card, auditEntry, error) {
 	}
 
 	var authorID int64
-	err := tx.QueryRow(`SELECT id FROM users WHERE username = ?`, author).Scan(&authorID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return Card{}, auditEntry{}, badRequest(fmt.Sprintf("unknown author %q", author))
+	var isBot bool
+	err := tx.QueryRow(`SELECT id, is_bot FROM users WHERE username = ?`, author).Scan(&authorID, &isBot)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && !isBot) {
+		return Card{}, auditEntry{}, badRequest("author must be a bot account")
 	}
 	if err != nil {
 		return Card{}, auditEntry{}, err
@@ -241,6 +276,9 @@ func applyCreate(tx *sql.Tx, req createRequest) (Card, auditEntry, error) {
 }
 
 func applyPatch(tx *sql.Tx, id int64, req patchRequest) (Card, auditEntry, error) {
+	if req.Circumstance == nil && req.Question == nil && req.Source == nil {
+		return Card{}, auditEntry{}, badRequest("at least one of circumstance, question, or source is required")
+	}
 	before, err := loadCard(tx, id)
 	if err != nil {
 		return Card{}, auditEntry{}, err
@@ -390,7 +428,11 @@ func parseID(r *http.Request) (int64, error) {
 }
 
 // Routes registers the JSON card API routes guarded by the Bearer API key.
+// If apiKey is empty, nothing is registered.
 func Routes(mux *http.ServeMux, db *sql.DB, apiKey string) {
+	if apiKey == "" {
+		return
+	}
 	auth := func(h http.HandlerFunc) http.HandlerFunc {
 		return requireBearer(apiKey, h)
 	}
@@ -434,6 +476,29 @@ func Routes(mux *http.ServeMux, db *sql.DB, apiKey string) {
 			args = append(args, sub, sub)
 		}
 
+		limit := defaultListLimit
+		if raw := q.Get("limit"); raw != "" {
+			n, err := strconv.Atoi(raw)
+			if err != nil || n < 1 {
+				writeError(w, http.StatusBadRequest, "limit must be a positive integer")
+				return
+			}
+			if n > maxListLimit {
+				n = maxListLimit
+			}
+			limit = n
+		}
+
+		offset := 0
+		if raw := q.Get("offset"); raw != "" {
+			n, err := strconv.Atoi(raw)
+			if err != nil || n < 0 {
+				writeError(w, http.StatusBadRequest, "offset must be a non-negative integer")
+				return
+			}
+			offset = n
+		}
+
 		query := `
 			SELECT c.id, c.circumstance, c.question, c.source, u.username, c.created_at, c.archived_at
 			FROM cards c
@@ -441,7 +506,8 @@ func Routes(mux *http.ServeMux, db *sql.DB, apiKey string) {
 		if len(conds) > 0 {
 			query += " WHERE " + strings.Join(conds, " AND ")
 		}
-		query += " ORDER BY c.id DESC"
+		query += " ORDER BY c.id DESC LIMIT ? OFFSET ?"
+		args = append(args, limit, offset)
 
 		rows, err := db.Query(query, args...)
 		if err != nil {
@@ -487,7 +553,7 @@ func Routes(mux *http.ServeMux, db *sql.DB, apiKey string) {
 
 	mux.HandleFunc("POST /api/cards", auth(func(w http.ResponseWriter, r *http.Request) {
 		var req createRequest
-		if err := decodeJSON(r, &req); err != nil {
+		if err := decodeJSON(w, r, &req); err != nil {
 			handleErr(w, err)
 			return
 		}
@@ -504,7 +570,7 @@ func Routes(mux *http.ServeMux, db *sql.DB, apiKey string) {
 			handleErr(w, err)
 			return
 		}
-		writeJSON(w, http.StatusCreated, created)
+		writeCardResult(w, http.StatusCreated, created, isDryRun(r))
 	}))
 
 	mux.HandleFunc("PATCH /api/cards/{id}", auth(func(w http.ResponseWriter, r *http.Request) {
@@ -514,7 +580,7 @@ func Routes(mux *http.ServeMux, db *sql.DB, apiKey string) {
 			return
 		}
 		var req patchRequest
-		if err := decodeJSON(r, &req); err != nil {
+		if err := decodeJSON(w, r, &req); err != nil {
 			handleErr(w, err)
 			return
 		}
@@ -531,7 +597,7 @@ func Routes(mux *http.ServeMux, db *sql.DB, apiKey string) {
 			handleErr(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, updated)
+		writeCardResult(w, http.StatusOK, updated, isDryRun(r))
 	}))
 
 	mux.HandleFunc("POST /api/cards/{id}/archive", auth(func(w http.ResponseWriter, r *http.Request) {
@@ -553,7 +619,7 @@ func Routes(mux *http.ServeMux, db *sql.DB, apiKey string) {
 			handleErr(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, updated)
+		writeCardResult(w, http.StatusOK, updated, isDryRun(r))
 	}))
 
 	mux.HandleFunc("POST /api/cards/{id}/restore", auth(func(w http.ResponseWriter, r *http.Request) {
@@ -575,13 +641,17 @@ func Routes(mux *http.ServeMux, db *sql.DB, apiKey string) {
 			handleErr(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, updated)
+		writeCardResult(w, http.StatusOK, updated, isDryRun(r))
 	}))
 
 	mux.HandleFunc("POST /api/cards/batch", auth(func(w http.ResponseWriter, r *http.Request) {
 		var req batchRequest
-		if err := decodeJSON(r, &req); err != nil {
+		if err := decodeJSON(w, r, &req); err != nil {
 			handleErr(w, err)
+			return
+		}
+		if len(req.Ops) > maxBatchOps {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("batch exceeds maximum of %d ops", maxBatchOps))
 			return
 		}
 		results := make([]Card, 0, len(req.Ops))
@@ -650,6 +720,6 @@ func Routes(mux *http.ServeMux, db *sql.DB, apiKey string) {
 			handleErr(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, batchResponse{Results: results})
+		writeJSON(w, http.StatusOK, batchResponse{DryRun: isDryRun(r), Results: results})
 	}))
 }

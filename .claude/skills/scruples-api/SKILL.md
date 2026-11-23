@@ -8,12 +8,12 @@ description: Use the Scruples JSON card API to list, create, patch, archive, res
 Base URL: `https://scruples.nickgerrard.dev`
 Auth: `Authorization: Bearer $SCRUPLES_API_KEY` (all responses are JSON; no cookies/sessions).
 
-Always preview writes with `?dry_run=1` first — dry runs execute inside a transaction, roll back without modifying `cards`, return the exact result that would occur, and still record an `api_audit` entry.
+Always preview writes with `?dry_run=1` first — dry runs execute inside a transaction, roll back without modifying `cards`, return `"dry_run": true` alongside what would occur, and still record an `api_audit` entry. Every successful write is audited.
 
 ## List & Inspect Cards
 
 ```sh
-# Active cards (default archived=0); supports source=human|ai, archived=0|1|all, author=<name>, q=<substring>
+# Active cards (default archived=0, limit=500 max 1000, offset=0); supports source=human|ai, archived=0|1|all, author=<name>, q=<substring>
 curl -sS -H "Authorization: Bearer $SCRUPLES_API_KEY" \
   "https://scruples.nickgerrard.dev/api/cards?source=ai&archived=0"
 

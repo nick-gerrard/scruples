@@ -32,9 +32,9 @@ Stack: Go 1.26, SQLite via the pure-Go `modernc.org/sqlite` driver, server-rende
 ## Card API
 
 - Enabled only when `SCRUPLES_API_KEY` is non-empty; otherwise every `/api/` path returns 404.
-- **Auth**: `Authorization: Bearer <key>` compared with `crypto/subtle.ConstantTimeCompare` (401 JSON `{"error":"unauthorized"}` on missing/wrong key). JSON only; no cookies or sessions.
-- **Endpoints**: `GET /api/cards` (`?source=human|ai&archived=0|1|all&author=&q=`, default `archived=0`), `GET /api/cards/{id}`, `POST /api/cards` (defaults `source="ai"`, `author="Claude"`), `PATCH /api/cards/{id}`, `POST /api/cards/{id}/archive`, `POST /api/cards/{id}/restore`, and `POST /api/cards/batch` (all-or-nothing single transaction).
-- **Dry runs & audit**: every write accepts `?dry_run=1` (runs in a transaction, rolls back, returns what would have happened). Every write—dry or not—writes before/after JSON to `api_audit` (for dry runs, recorded after rollback).
+- **Auth**: `Authorization: Bearer <key>` compared via SHA-256 + `crypto/subtle.ConstantTimeCompare` (401 JSON `{"error":"unauthorized"}` on missing/wrong key). JSON only; no cookies or sessions.
+- **Endpoints**: `GET /api/cards` (`?source=human|ai&archived=0|1|all&author=&q=&limit=&offset=`, default `archived=0`, `limit=500` max `1000`), `GET /api/cards/{id}`, `POST /api/cards` (defaults `source="ai"`, `author="Claude"`; bot authors only), `PATCH /api/cards/{id}`, `POST /api/cards/{id}/archive`, `POST /api/cards/{id}/restore`, and `POST /api/cards/batch` (max 200 ops, all-or-nothing single transaction).
+- **Dry runs & audit**: every write accepts `?dry_run=1` (runs in a transaction, rolls back, returns what would have happened with `"dry_run": true`). Every successful write is audited with before/after JSON in `api_audit` (for dry runs, recorded after rollback).
 - **Bot user**: migration 3 seeds the `Claude` user (`is_bot = 1`, `password_hash = '!'`) as the default AI card author; `POST /login` always refuses `is_bot` users.
 
 ## Running Locally & Testing
