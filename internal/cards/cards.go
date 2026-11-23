@@ -43,6 +43,7 @@ func Routes(mux *http.ServeMux, app *web.App) {
 			SELECT c.id, c.circumstance, c.question, c.author_id, u.username, c.created_at
 			FROM cards c
 			JOIN users u ON u.id = c.author_id
+			WHERE c.archived_at IS NULL
 			ORDER BY c.id DESC`)
 		if err != nil {
 			log.Printf("cards: query deck: %v", err)
@@ -129,8 +130,16 @@ func Routes(mux *http.ServeMux, app *web.App) {
 			return
 		}
 
+		tx, err := app.DB.Begin()
+		if err != nil {
+			log.Printf("cards: begin archive %d: %v", id, err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+		defer tx.Rollback()
+
 		var authorID int64
-		err = app.DB.QueryRow(`SELECT author_id FROM cards WHERE id = ?`, id).Scan(&authorID)
+		err = tx.QueryRow(`SELECT author_id FROM cards WHERE id = ? AND archived_at IS NULL`, id).Scan(&authorID)
 		if errors.Is(err, sql.ErrNoRows) {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
@@ -146,8 +155,13 @@ func Routes(mux *http.ServeMux, app *web.App) {
 			return
 		}
 
-		if _, err := app.DB.Exec(`DELETE FROM cards WHERE id = ?`, id); err != nil {
-			log.Printf("cards: delete card %d: %v", id, err)
+		if _, err := tx.Exec(`UPDATE cards SET archived_at = datetime('now') WHERE id = ? AND archived_at IS NULL`, id); err != nil {
+			log.Printf("cards: archive card %d: %v", id, err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+		if err := tx.Commit(); err != nil {
+			log.Printf("cards: commit archive %d: %v", id, err)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}

@@ -112,8 +112,15 @@ func (a *App) RenderFragment(w http.ResponseWriter, file string, name string, da
 
 const sessionDuration = 30 * 24 * time.Hour
 
+func isHTTPS(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	return r.TLS != nil || strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https")
+}
+
 // CreateSession creates a session row for the user and sets the session cookie.
-func (a *App) CreateSession(w http.ResponseWriter, userID int64) error {
+func (a *App) CreateSession(w http.ResponseWriter, r *http.Request, userID int64) error {
 	buf := make([]byte, 32)
 	if _, err := rand.Read(buf); err != nil {
 		return err
@@ -132,6 +139,7 @@ func (a *App) CreateSession(w http.ResponseWriter, userID int64) error {
 		Path:     "/",
 		MaxAge:   int(sessionDuration / time.Second),
 		HttpOnly: true,
+		Secure:   isHTTPS(r),
 		SameSite: http.SameSiteLaxMode,
 	})
 	return nil
@@ -160,6 +168,7 @@ func (a *App) DestroySession(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
+		Secure:   isHTTPS(r),
 		SameSite: http.SameSiteLaxMode,
 	})
 }

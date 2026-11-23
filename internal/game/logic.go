@@ -84,18 +84,20 @@ func pickCard(q querier, gameID, drawerID int64, mode string) (int64, error) {
 	if mode == "classic" {
 		cands = append(cands, cand{
 			`SELECT id FROM cards
-			 WHERE id NOT IN (SELECT card_id FROM rounds WHERE game_id = ?) AND author_id != ?
+			 WHERE archived_at IS NULL
+			   AND id NOT IN (SELECT card_id FROM rounds WHERE game_id = ?) AND author_id != ?
 			 ORDER BY RANDOM() LIMIT 1`, []any{gameID, drawerID}})
 	}
 	cands = append(cands, cand{
 		`SELECT id FROM cards
-		 WHERE id NOT IN (SELECT card_id FROM rounds WHERE game_id = ?)
+		 WHERE archived_at IS NULL
+		   AND id NOT IN (SELECT card_id FROM rounds WHERE game_id = ?)
 		 ORDER BY RANDOM() LIMIT 1`, []any{gameID}})
 	if mode == "classic" {
 		cands = append(cands, cand{
-			`SELECT id FROM cards WHERE author_id != ? ORDER BY RANDOM() LIMIT 1`, []any{drawerID}})
+			`SELECT id FROM cards WHERE archived_at IS NULL AND author_id != ? ORDER BY RANDOM() LIMIT 1`, []any{drawerID}})
 	}
-	cands = append(cands, cand{`SELECT id FROM cards ORDER BY RANDOM() LIMIT 1`, nil})
+	cands = append(cands, cand{`SELECT id FROM cards WHERE archived_at IS NULL ORDER BY RANDOM() LIMIT 1`, nil})
 
 	for _, c := range cands {
 		var id int64
