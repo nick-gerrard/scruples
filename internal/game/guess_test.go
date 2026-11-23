@@ -146,6 +146,45 @@ func TestDoGuessRejections(t *testing.T) {
 	reject("complete round", f.carol, f.bob.ID)
 }
 
+func TestGuessCandidatesKeepCardAuthor(t *testing.T) {
+	f := newGuessFixture(t, true)
+	// Bob's cards get archived after the draw: he must stay a candidate.
+	if _, err := f.d.Exec(`UPDATE cards SET archived_at = datetime('now') WHERE author_id = ?`, f.bob.ID); err != nil {
+		t.Fatal(err)
+	}
+	cands, err := guessCandidates(f.d, true, f.alice.ID, f.bob.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, c := range cands {
+		names = append(names, c.Name)
+	}
+	if strings.Join(names, ",") != "bob,carol,dave" {
+		t.Fatalf("candidates = %v, want bob,carol,dave (name order)", names)
+	}
+	if err := doGuess(f.d, f.alice, f.bob.ID); err != nil {
+		t.Fatalf("guess archived author: %v", err)
+	}
+	f.complete(t)
+	g, _ := activeGame(f.d)
+	rd, _ := latestRound(f.d, g.ID)
+	s, err := buildRoundSummary(f.d, g, rd, 1, time.Date(2026, 11, 23, 21, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Guesses) != 1 || !s.Guesses[0].Correct {
+		t.Fatalf("guesses = %+v, want one correct", s.Guesses)
+	}
+	// Someone who isn't the card author and has no active cards is still out.
+	if _, err := f.d.Exec(`UPDATE cards SET archived_at = datetime('now') WHERE author_id = ?`, f.dave.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := doGuess(f.d, f.carol, f.dave.ID); !errors.Is(err, errGuessRejected) {
+		t.Fatalf("err = %v, want rejection", err)
+	}
+}
+
 func TestDoGuessSettingOff(t *testing.T) {
 	f := newGuessFixture(t, false)
 	if err := doGuess(f.d, f.alice, f.bob.ID); !errors.Is(err, errGuessRejected) {

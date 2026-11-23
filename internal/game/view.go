@@ -1056,7 +1056,7 @@ func buildViewInner(db *sql.DB, me *web.User, errMsg string) (*GameView, error) 
 			).Scan(&gp.MyGuessID); err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return nil, err
 			}
-			if gp.Candidates, err = guessCandidates(db, g.IncludeAI, me.ID); err != nil {
+			if gp.Candidates, err = guessCandidates(db, g.IncludeAI, me.ID, authorID); err != nil {
 				return nil, err
 			}
 		}

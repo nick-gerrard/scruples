@@ -189,16 +189,24 @@ type guessCandidate struct {
 // guessCandidates lists the distinct authors of the active deck the game draws
 // from, sorted by name, never including excludeID. The Claude bot appears only
 // when AI cards are in play. Users are loaded once, with avatar versions.
-func guessCandidates(q querier, includeAI bool, excludeID int64) ([]guessCandidate, error) {
-	where := "c.archived_at IS NULL AND u.id != ?"
+//
+// cardAuthorID (the current round card's true author) is always included, even
+// if their cards were archived or AI was switched off after the draw, so a
+// correct guess stays possible; they are not marked or ordered differently.
+func guessCandidates(q querier, includeAI bool, excludeID, cardAuthorID int64) ([]guessCandidate, error) {
+	deck := "c.archived_at IS NULL"
 	if !includeAI {
-		where += " AND c.source != 'ai' AND u.is_bot = 0"
+		deck += " AND c.source != 'ai'"
+	}
+	userCond := "u.id IN (SELECT c.author_id FROM cards c WHERE " + deck + ")"
+	if !includeAI {
+		userCond += " AND u.is_bot = 0"
 	}
 	rows, err := q.Query(
-		`SELECT DISTINCT u.id, u.username, COALESCE(u.avatar_path, '')
-		 FROM cards c JOIN users u ON u.id = c.author_id
-		 WHERE `+where+`
-		 ORDER BY u.username COLLATE NOCASE, u.id`, excludeID)
+		`SELECT u.id, u.username, COALESCE(u.avatar_path, '')
+		 FROM users u
+		 WHERE u.id != ? AND ((`+userCond+`) OR u.id = ?)
+		 ORDER BY u.username COLLATE NOCASE, u.id`, excludeID, cardAuthorID)
 	if err != nil {
 		return nil, err
 	}
@@ -250,7 +258,7 @@ func doGuess(db *sql.DB, u *web.User, guessedID int64) error {
 	if authorID == u.ID {
 		return fmt.Errorf("%w: you wrote this card", errGuessRejected)
 	}
-	cands, err := guessCandidates(tx, g.IncludeAI, u.ID)
+	cands, err := guessCandidates(tx, g.IncludeAI, u.ID, authorID)
 	if err != nil {
 		return err
 	}
