@@ -4,8 +4,12 @@ import (
 	"bytes"
 	"encoding/xml"
 	"io"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+
+	"scruples/internal/db"
 )
 
 func TestGenerateAvatarSVGDeterministicAndValidXML(t *testing.T) {
@@ -58,7 +62,7 @@ func TestGenerateAvatarSVGDeterministicAndValidXML(t *testing.T) {
 func TestAvatarTemplateHelper(t *testing.T) {
 	got := string(Avatar(42, `alice "the" <great>`, 32))
 	checks := []string{
-		`src="/avatar/42"`,
+		`src="/avatar/42?v=gen"`,
 		`width="32"`,
 		`height="32"`,
 		`loading="lazy"`,
@@ -69,5 +73,36 @@ func TestAvatarTemplateHelper(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("Avatar() = %q, missing %q", got, want)
 		}
+	}
+}
+
+func TestAppAvatarHelperWithDB(t *testing.T) {
+	database, err := db.Open(filepath.Join(t.TempDir(), "avatar-helper.db"))
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+
+	res, err := database.Exec(`INSERT INTO users (username, password_hash) VALUES ('alice', 'hash')`)
+	if err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	uid, _ := res.LastInsertId()
+	uidStr := strconv.FormatInt(uid, 10)
+	app := NewApp(database)
+
+	before := string(app.Avatar(uid, "alice", 40))
+	if !strings.Contains(before, `src="/avatar/`+uidStr+`?v=gen"`) {
+		t.Fatalf("app.Avatar before upload = %q, want ?v=gen", before)
+	}
+
+	const avatarPath = "avatars/1-deadbeefcafebabe.jpg"
+	if _, err := database.Exec(`UPDATE users SET avatar_path = ? WHERE id = ?`, avatarPath, uid); err != nil {
+		t.Fatalf("update avatar_path: %v", err)
+	}
+	wantV := AvatarVersion(avatarPath)
+	after := string(app.Avatar(uid, "alice", 40))
+	if !strings.Contains(after, `src="/avatar/`+uidStr+`?v=`+wantV+`"`) {
+		t.Fatalf("app.Avatar after upload = %q, want ?v=%s", after, wantV)
 	}
 }

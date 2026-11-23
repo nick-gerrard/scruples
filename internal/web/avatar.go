@@ -8,15 +8,42 @@ import (
 	"strings"
 )
 
-// Avatar renders an <img> tag for the user's avatar at the given pixel size.
-func Avatar(id int64, name string, size int) template.HTML {
+// AvatarVersion returns a short deterministic version token for cache-busting:
+// "gen" for the default generated avatar, or a 12-char hex hash of avatarPath.
+func AvatarVersion(avatarPath string) string {
+	if avatarPath == "" {
+		return "gen"
+	}
+	sum := sha256.Sum256([]byte(avatarPath))
+	return fmt.Sprintf("%x", sum[:6])
+}
+
+func avatarHTML(id int64, name string, size int, version string) template.HTML {
 	if size <= 0 {
 		size = 32
 	}
+	if version == "" {
+		version = "gen"
+	}
 	return template.HTML(fmt.Sprintf(
-		`<img src="/avatar/%d" alt="%s" width="%d" height="%d" loading="lazy" class="inline-block shrink-0 rounded-full object-cover" style="width:%dpx;height:%dpx">`,
-		id, template.HTMLEscapeString(name), size, size, size, size,
+		`<img src="/avatar/%d?v=%s" alt="%s" width="%d" height="%d" loading="lazy" class="inline-block shrink-0 rounded-full object-cover" style="width:%dpx;height:%dpx">`,
+		id, template.HTMLEscapeString(version), template.HTMLEscapeString(name), size, size, size, size,
 	))
+}
+
+// Avatar renders an <img> tag for the user's avatar at the given pixel size.
+func Avatar(id int64, name string, size int) template.HTML {
+	return avatarHTML(id, name, size, "gen")
+}
+
+// Avatar renders an <img> tag for the user's avatar with a cache-busting query
+// parameter derived from the user's current avatar_path (or "gen").
+func (a *App) Avatar(id int64, name string, size int) template.HTML {
+	var avatarPath string
+	if a != nil && a.DB != nil {
+		_ = a.DB.QueryRow(`SELECT COALESCE(avatar_path, '') FROM users WHERE id = ?`, id).Scan(&avatarPath)
+	}
+	return avatarHTML(id, name, size, AvatarVersion(avatarPath))
 }
 
 type avatarPalette struct {

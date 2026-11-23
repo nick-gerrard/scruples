@@ -11,10 +11,12 @@ import (
 	"time"
 )
 
-// funcs are helpers available in all templates.
-var funcs = template.FuncMap{
-	"hasPrefix": strings.HasPrefix,
-	"avatar":    Avatar,
+// templateFuncs returns the helpers available in all templates.
+func (a *App) templateFuncs() template.FuncMap {
+	return template.FuncMap{
+		"hasPrefix": strings.HasPrefix,
+		"avatar":    a.Avatar,
+	}
 }
 
 // User is the logged-in user attached to a request.
@@ -85,7 +87,7 @@ func (a *App) RequireUser(h http.HandlerFunc) http.HandlerFunc {
 // Render renders a full page: layout.html plus the given page file,
 // executing the "layout" template.
 func (a *App) Render(w http.ResponseWriter, r *http.Request, page string, data any) {
-	tmpl, err := template.New("layout.html").Funcs(funcs).ParseFiles("templates/layout.html", "templates/"+page)
+	tmpl, err := template.New("layout.html").Funcs(a.templateFuncs()).ParseFiles("templates/layout.html", "templates/"+page)
 	if err != nil {
 		log.Printf("render %s: parse: %v", page, err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -109,7 +111,7 @@ func (a *App) Render(w http.ResponseWriter, r *http.Request, page string, data a
 // RenderFragment renders a named template from a single page file with no
 // layout, for htmx partial responses.
 func (a *App) RenderFragment(w http.ResponseWriter, file string, name string, data any) {
-	tmpl, err := template.New(file).Funcs(funcs).ParseFiles("templates/" + file)
+	tmpl, err := template.New(file).Funcs(a.templateFuncs()).ParseFiles("templates/" + file)
 	if err != nil {
 		log.Printf("fragment %s#%s: parse: %v", file, name, err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)

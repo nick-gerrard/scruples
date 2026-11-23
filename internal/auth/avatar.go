@@ -2,6 +2,7 @@ package auth
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
@@ -21,6 +22,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/image/draw"
 
@@ -29,7 +31,7 @@ import (
 
 const (
 	maxAvatarUploadBytes = 5 << 20 // 5 MB
-	maxAvatarDimension   = 6000
+	maxAvatarDimension   = 4096
 	avatarOutputSize     = 256
 	avatarJPEGQuality    = 85
 )
@@ -37,6 +39,10 @@ const (
 var (
 	errUnsupportedFormat = errors.New("unsupported image format")
 	errImageTooLarge     = errors.New("image dimensions exceed limit")
+	errAvatarBusy        = errors.New("avatar processor busy")
+
+	avatarProcessSem = make(chan struct{}, 1)
+	avatarSemTimeout = 5 * time.Second
 )
 
 func avatarRoutes(mux *http.ServeMux, app *web.App) {
@@ -82,11 +88,14 @@ func handleAvatarUpload(w http.ResponseWriter, r *http.Request, app *web.App) {
 	}
 	defer file.Close()
 
-	jpegBytes, err := processAvatarImage(file)
+	jpegBytes, err := processAvatarImage(r.Context(), file)
 	if err != nil {
 		switch {
+		case errors.Is(err, errAvatarBusy):
+			w.Header().Set("Retry-After", "5")
+			fail(http.StatusServiceUnavailable, "Server is busy processing another image — please try again.")
 		case errors.Is(err, errImageTooLarge):
-			fail(http.StatusBadRequest, "Image dimensions must be 6000×6000 pixels or smaller.")
+			fail(http.StatusBadRequest, "Image dimensions must be 4096×4096 pixels or smaller.")
 		case errors.Is(err, errUnsupportedFormat):
 			fail(http.StatusBadRequest, "Please upload a JPEG, PNG, or GIF image.")
 		default:
@@ -212,7 +221,7 @@ func handleAvatarServe(w http.ResponseWriter, r *http.Request, app *web.App) {
 		fullPath := filepath.Join(app.UploadsPath(), filepath.FromSlash(avatarPath.String))
 		data, readErr := os.ReadFile(fullPath)
 		if readErr == nil {
-			serveCachedBytes(w, r, "image/jpeg", data)
+			serveCachedBytes(w, r, "image/jpeg", data, web.AvatarVersion(avatarPath.String))
 			return
 		}
 		if !errors.Is(readErr, os.ErrNotExist) {
@@ -221,15 +230,20 @@ func handleAvatarServe(w http.ResponseWriter, r *http.Request, app *web.App) {
 	}
 
 	svg := web.GenerateAvatarSVG(id, username)
-	serveCachedBytes(w, r, "image/svg+xml; charset=utf-8", svg)
+	serveCachedBytes(w, r, "image/svg+xml; charset=utf-8", svg, web.AvatarVersion(""))
 }
 
-func serveCachedBytes(w http.ResponseWriter, r *http.Request, contentType string, data []byte) {
+func serveCachedBytes(w http.ResponseWriter, r *http.Request, contentType string, data []byte, currentVersion string) {
 	sum := sha256.Sum256(data)
 	etag := fmt.Sprintf(`"%x"`, sum[:16])
 
+	cacheControl := "no-cache"
+	if r.URL.Query().Get("v") == currentVersion {
+		cacheControl = "public, max-age=31536000, immutable"
+	}
+
 	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Cache-Control", "public, max-age=300")
+	w.Header().Set("Cache-Control", cacheControl)
 	w.Header().Set("ETag", etag)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 
@@ -240,7 +254,7 @@ func serveCachedBytes(w http.ResponseWriter, r *http.Request, contentType string
 	_, _ = w.Write(data)
 }
 
-func processAvatarImage(r io.ReadSeeker) ([]byte, error) {
+func processAvatarImage(ctx context.Context, r io.ReadSeeker) ([]byte, error) {
 	cfg, format, err := image.DecodeConfig(r)
 	if err != nil {
 		return nil, err
@@ -254,6 +268,25 @@ func processAvatarImage(r io.ReadSeeker) ([]byte, error) {
 		return nil, errImageTooLarge
 	}
 
+	orientation := 1
+	if format == "jpeg" {
+		if _, err := r.Seek(0, io.SeekStart); err != nil {
+			return nil, err
+		}
+		orientation = readJPEGEXIFOrientation(r)
+	}
+
+	timer := time.NewTimer(avatarSemTimeout)
+	defer timer.Stop()
+	select {
+	case avatarProcessSem <- struct{}{}:
+		defer func() { <-avatarProcessSem }()
+	case <-timer.C:
+		return nil, errAvatarBusy
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+
 	if _, err := r.Seek(0, io.SeekStart); err != nil {
 		return nil, err
 	}
@@ -261,6 +294,8 @@ func processAvatarImage(r io.ReadSeeker) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	src = applyOrientation(src, orientation)
 
 	bounds := src.Bounds()
 	w, h := bounds.Dx(), bounds.Dy()
