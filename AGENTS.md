@@ -9,10 +9,10 @@ Stack: Go 1.26, SQLite via the pure-Go `modernc.org/sqlite` driver, server-rende
 ## Package Map
 
 - `main.go`: reads env vars, opens SQLite, seeds the admin account (`nick`), wires routes in `buildMux`, and serves HTTP.
-- `internal/db`: `Open(path)` configures SQLite (`foreign_keys(1)`, WAL mode, `SetMaxOpenConns(1)`) and applies the embedded schema.
+- `internal/db`: `Open(path)` configures SQLite (`foreign_keys(1)`, WAL mode, `SetMaxOpenConns(1)`) and runs versioned migrations from `migrate.go`.
 - `internal/web`: `App` dependency container (`*sql.DB`), cookie sessions (`scruples_session`, 30-day TTL), `CurrentUser`, `RequireUser` (401 for htmx, 303 redirect to `/login` otherwise), and template helpers (`Render`, `RenderFragment`).
 - `internal/auth`: `SeedAdmin`, bcrypt auth, and routes for `/login`, `/signup`, `/logout`, `/account`, and `/account/password`.
-- `internal/cards`: deck routes (`/cards`, `/cards/new`, `POST /cards`, `DELETE /cards/{id}` — author or admin only).
+- `internal/cards`: deck routes (`/cards`, `/cards/new`, `POST /cards`, `DELETE /cards/{id}` — archives the card; author or admin only).
 - `internal/game`:
   - `game.go`: HTTP handlers for `/game`, `/game/state`, `/game/{start,join,draw,answer,vote,challenge,challenge/vote,next,end}`, and `/winners`.
   - `logic.go`: game state transitions (`doStart`, `doJoin`, `pickCard`, `doDraw`, `maybeReveal`, `awardAndFinish`, `doNext`, `maybeResolveChallenge`, `doEnd`).
@@ -34,7 +34,7 @@ Environment variables (all optional locally):
 
 - `SCRUPLES_ADDR`: listen address (default `:8080`).
 - `SCRUPLES_DB`: SQLite file path (default `scruples.db`).
-- `SCRUPLES_ADMIN_PASSWORD`: initial password for the seeded `nick` admin user (default `changeme-admin`; set `SCRUPLES_RESET_ADMIN_PASSWORD=1` to force-reset on startup).
+- `SCRUPLES_ADMIN_PASSWORD`: initial password for the seeded `nick` admin user (if unset when `nick` does not exist yet, a random 16-byte hex password is generated and logged once; set `SCRUPLES_RESET_ADMIN_PASSWORD=1` to force-reset on startup).
 
 Common commands (see `Makefile`):
 
@@ -51,5 +51,5 @@ make build   # go build -o scruples .
 - **Never call `app.DB` inside an open transaction**: `db.Open` calls `SetMaxOpenConns(1)`, so querying `app.DB` while holding a `*sql.Tx` will deadlock. Pass the `*sql.Tx` (via `querier`) to any helper called inside a transaction.
 - **Keep handlers' state checks inside transactions**: check current game/round state and apply mutations in the same transaction to avoid check-then-act races.
 - **No secrets in git**: `*.db` files are gitignored; production `SCRUPLES_ADMIN_PASSWORD` lives in the server's roost env file, never in `deploy.toml` or source code.
-- **Schema changes**: schema changes go through migrations in `internal/db` (being added; until then the schema lives in `internal/db/db.go`).
+- **Schema changes**: append a new entry to `migrations` in `internal/db/migrate.go` with the next integer `Version`; never edit a migration that has already been applied.
 - **Branch & PR workflow**: always work on a branch and open a pull request. `main` is protected, and merging to `main` automatically deploys to production via `roost`.

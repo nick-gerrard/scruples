@@ -414,3 +414,77 @@ func TestDoNextClassicScoringAndFinish(t *testing.T) {
 		}
 	}
 }
+
+func TestPickCardExcludesArchived(t *testing.T) {
+	d := openTestDB(t)
+	alice := createUser(t, d, "alice")
+	bob := createUser(t, d, "bob")
+
+	if err := doStart(d, alice, "classic", 5); err != nil {
+		t.Fatalf("doStart: %v", err)
+	}
+	if err := doJoin(d, bob); err != nil {
+		t.Fatalf("doJoin: %v", err)
+	}
+	g, err := activeGame(d)
+	if err != nil {
+		t.Fatalf("activeGame: %v", err)
+	}
+
+	// Create 4 cards: 3 by Bob (preferred for Alice) and 1 by Alice.
+	// Archive all of Bob's cards so only Alice's card remains active.
+	bob1 := createCard(t, d, bob.ID, "Bob 1", "Q1?")
+	bob2 := createCard(t, d, bob.ID, "Bob 2", "Q2?")
+	bob3 := createCard(t, d, bob.ID, "Bob 3", "Q3?")
+	onlyActive := createCard(t, d, alice.ID, "Alice active", "Q4?")
+
+	for _, id := range []int64{bob1, bob2, bob3} {
+		if _, err := d.Exec(`UPDATE cards SET archived_at = datetime('now') WHERE id = ?`, id); err != nil {
+			t.Fatalf("archive card %d: %v", id, err)
+		}
+	}
+
+	// Even when the only active card is authored by the drawer (forcing fallback)
+	// and even after it has been used in a round (forcing deepest fallback),
+	// pickCard must never return an archived card.
+	for i := range 10 {
+		got, err := pickCard(d, g.ID, alice.ID, "classic")
+		if err != nil {
+			t.Fatalf("pickCard classic #%d: %v", i, err)
+		}
+		if got != onlyActive {
+			t.Fatalf("pickCard classic #%d = %d, want %d", i, got, onlyActive)
+		}
+	}
+
+	// Mark the only active card as used in this game to exercise the final fallbacks.
+	if _, err := d.Exec(
+		`INSERT INTO rounds (game_id, card_id, drawer_id, status) VALUES (?, ?, ?, 'complete')`,
+		g.ID, onlyActive, alice.ID,
+	); err != nil {
+		t.Fatalf("insert round: %v", err)
+	}
+	for _, mode := range []string{"classic", "freeplay"} {
+		for i := range 10 {
+			got, err := pickCard(d, g.ID, alice.ID, mode)
+			if err != nil {
+				t.Fatalf("pickCard fallback %s #%d: %v", mode, i, err)
+			}
+			if got != onlyActive {
+				t.Fatalf("pickCard fallback %s #%d = %d, want %d", mode, i, got, onlyActive)
+			}
+		}
+	}
+
+	// Archiving the last card makes the deck empty.
+	if _, err := d.Exec(`UPDATE cards SET archived_at = datetime('now') WHERE id = ?`, onlyActive); err != nil {
+		t.Fatalf("archive last card: %v", err)
+	}
+	got, err := pickCard(d, g.ID, alice.ID, "classic")
+	if err != nil {
+		t.Fatalf("pickCard all archived: %v", err)
+	}
+	if got != 0 {
+		t.Fatalf("pickCard all archived = %d, want 0", got)
+	}
+}

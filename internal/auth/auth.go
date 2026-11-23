@@ -1,7 +1,10 @@
 package auth
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
+	"errors"
 	"log"
 	"net/http"
 	"regexp"
@@ -12,26 +15,54 @@ import (
 	"scruples/internal/web"
 )
 
-// SeedAdmin makes sure the admin user "nick" exists. The given password is only
-// used when the user is first created, so a password changed on the account page
-// survives restarts; pass reset=true to force it back to the given password
-// (lockout recovery).
+// SeedAdmin makes sure the admin user "nick" exists. If the user does not exist
+// yet and password is empty, a random 16-byte hex password is generated and
+// logged once. When the user already exists, its password is left alone unless
+// reset=true (lockout recovery).
 func SeedAdmin(db *sql.DB, password string, reset bool) error {
+	var exists int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM users WHERE username = 'nick'`).Scan(&exists); err != nil {
+		return err
+	}
+	if exists > 0 {
+		if !reset {
+			_, err := db.Exec(`UPDATE users SET is_admin = 1 WHERE username = 'nick'`)
+			return err
+		}
+		if password == "" {
+			return errors.New("SCRUPLES_RESET_ADMIN_PASSWORD requires SCRUPLES_ADMIN_PASSWORD")
+		}
+		hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		if err != nil {
+			return err
+		}
+		_, err = db.Exec(`UPDATE users SET password_hash = ?, is_admin = 1 WHERE username = 'nick'`, string(hash))
+		return err
+	}
+
+	generated := false
+	if password == "" {
+		buf := make([]byte, 16)
+		if _, err := rand.Read(buf); err != nil {
+			return err
+		}
+		password = hex.EncodeToString(buf)
+		generated = true
+	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return err
 	}
-	onConflict := `UPDATE SET is_admin = 1`
-	if reset {
-		onConflict = `UPDATE SET password_hash = excluded.password_hash, is_admin = 1`
-	}
-	_, err = db.Exec(`
-		INSERT INTO users (username, password_hash, is_admin)
-		VALUES ('nick', ?, 1)
-		ON CONFLICT(username) DO `+onConflict,
+	if _, err := db.Exec(
+		`INSERT INTO users (username, password_hash, is_admin) VALUES ('nick', ?, 1)`,
 		string(hash),
-	)
-	return err
+	); err != nil {
+		return err
+	}
+	if generated {
+		log.Printf("Created admin user %q with generated password: %s", "nick", password)
+	}
+	return nil
 }
 
 var usernameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
@@ -74,7 +105,7 @@ func Routes(mux *http.ServeMux, app *web.App) {
 			})
 			return
 		}
-		if err := app.CreateSession(w, id); err != nil {
+		if err := app.CreateSession(w, r, id); err != nil {
 			log.Printf("login: create session: %v", err)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
@@ -133,7 +164,7 @@ func Routes(mux *http.ServeMux, app *web.App) {
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
-		if err := app.CreateSession(w, id); err != nil {
+		if err := app.CreateSession(w, r, id); err != nil {
 			log.Printf("signup: create session: %v", err)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
