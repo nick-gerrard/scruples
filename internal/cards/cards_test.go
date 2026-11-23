@@ -73,13 +73,20 @@ func TestDeleteCardArchives(t *testing.T) {
 		t.Fatalf("insert round: %v", err)
 	}
 
-	// Non-author non-admin cannot archive the card.
+	// Non-author non-admin gets 404 (no ID enumeration) and card remains unarchived.
 	req := httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/cards/%d", cardID), nil)
 	req.AddCookie(sessionCookieFor(t, app, bobID))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("bob DELETE /cards/%d status = %d, want %d", cardID, rec.Code, http.StatusForbidden)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("bob DELETE /cards/%d status = %d, want %d", cardID, rec.Code, http.StatusNotFound)
+	}
+	var beforeArch sql.NullString
+	if err := database.QueryRow(`SELECT archived_at FROM cards WHERE id = ?`, cardID).Scan(&beforeArch); err != nil {
+		t.Fatalf("query card after bob DELETE: %v", err)
+	}
+	if beforeArch.Valid {
+		t.Fatalf("bob DELETE mutated archived_at to %q", beforeArch.String)
 	}
 
 	// Author archives the card -> 200 OK, row remains with archived_at set.
@@ -189,29 +196,53 @@ func TestDeckPrivacyAndAdminFilters(t *testing.T) {
 		}
 	}
 
-	// Non-admin cannot fetch/edit another user's card or an AI card (403) or archived card (404), nor restore (403).
+	// Non-admin gets 404 (identical to a missing id) on every per-card route for
+	// another user's card, an AI card, or an archived card, and leaves cards unchanged.
 	for _, tc := range []struct {
 		method string
 		path   string
-		want   int
+		body   string
 	}{
-		{http.MethodGet, fmt.Sprintf("/cards/%d/edit", bobCardID), http.StatusForbidden},
-		{http.MethodPost, fmt.Sprintf("/cards/%d", bobCardID), http.StatusForbidden},
-		{http.MethodGet, fmt.Sprintf("/cards/%d/edit", aiCardID), http.StatusForbidden},
-		{http.MethodPost, fmt.Sprintf("/cards/%d", aiCardID), http.StatusForbidden},
-		{http.MethodGet, fmt.Sprintf("/cards/%d/edit", aliceArchivedID), http.StatusNotFound},
-		{http.MethodPost, fmt.Sprintf("/cards/%d", aliceArchivedID), http.StatusNotFound},
-		{http.MethodPost, fmt.Sprintf("/cards/%d/restore", aliceArchivedID), http.StatusForbidden},
+		{http.MethodGet, fmt.Sprintf("/cards/%d/edit", bobCardID), ""},
+		{http.MethodPost, fmt.Sprintf("/cards/%d", bobCardID), url.Values{"circumstance": {"Hacked"}, "question": {"Hacked?"}}.Encode()},
+		{http.MethodDelete, fmt.Sprintf("/cards/%d", bobCardID), ""},
+		{http.MethodGet, fmt.Sprintf("/cards/%d/edit", aiCardID), ""},
+		{http.MethodPost, fmt.Sprintf("/cards/%d", aiCardID), url.Values{"circumstance": {"Hacked"}, "question": {"Hacked?"}}.Encode()},
+		{http.MethodDelete, fmt.Sprintf("/cards/%d", aiCardID), ""},
+		{http.MethodGet, fmt.Sprintf("/cards/%d/edit", aliceArchivedID), ""},
+		{http.MethodPost, fmt.Sprintf("/cards/%d", aliceArchivedID), url.Values{"circumstance": {"Hacked"}, "question": {"Hacked?"}}.Encode()},
+		{http.MethodPost, fmt.Sprintf("/cards/%d/restore", aliceArchivedID), ""},
 	} {
-		req := httptest.NewRequest(tc.method, tc.path, nil)
+		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+		if tc.body != "" {
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		}
 		req.AddCookie(aliceCookie)
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
-		if rec.Code != tc.want {
-			t.Errorf("alice %s %s status = %d, want %d", tc.method, tc.path, rec.Code, tc.want)
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("alice %s %s status = %d, want %d", tc.method, tc.path, rec.Code, http.StatusNotFound)
 		}
 		if strings.Contains(rec.Body.String(), "BOB_SECRET_SCENE") || strings.Contains(rec.Body.String(), "CLAUDE_AI_SCENE") {
 			t.Errorf("alice %s %s leaked card text", tc.method, tc.path)
+		}
+	}
+
+	// Verify neither Bob's card nor the AI card was modified or archived by Alice's attempts.
+	for _, check := range []struct {
+		id        int64
+		wantScene string
+	}{
+		{bobCardID, "BOB_SECRET_SCENE"},
+		{aiCardID, "CLAUDE_AI_SCENE"},
+	} {
+		var scene string
+		var arch sql.NullString
+		if err := database.QueryRow(`SELECT circumstance, archived_at FROM cards WHERE id = ?`, check.id).Scan(&scene, &arch); err != nil {
+			t.Fatalf("query card %d: %v", check.id, err)
+		}
+		if scene != check.wantScene || arch.Valid {
+			t.Fatalf("card %d mutated: scene=%q (want %q), archived_at=%v", check.id, scene, check.wantScene, arch)
 		}
 	}
 

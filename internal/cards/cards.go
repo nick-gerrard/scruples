@@ -220,11 +220,7 @@ func Routes(mux *http.ServeMux, app *web.App) {
 			return
 		}
 
-		if !canModify(user, authorID, source) {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
-		}
-		if !user.IsAdmin && archivedAt.Valid {
+		if !canModify(user, authorID, source) || (!user.IsAdmin && archivedAt.Valid) {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
@@ -272,11 +268,7 @@ func Routes(mux *http.ServeMux, app *web.App) {
 			return
 		}
 
-		if !canModify(user, authorID, source) {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
-		}
-		if !user.IsAdmin && archivedAt.Valid {
+		if !canModify(user, authorID, source) || (!user.IsAdmin && archivedAt.Valid) {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
@@ -341,7 +333,7 @@ func Routes(mux *http.ServeMux, app *web.App) {
 		}
 
 		if !canModify(user, authorID, source) {
-			http.Error(w, "forbidden", http.StatusForbidden)
+			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
 
@@ -362,7 +354,7 @@ func Routes(mux *http.ServeMux, app *web.App) {
 	mux.HandleFunc("POST /cards/{id}/restore", app.RequireUser(func(w http.ResponseWriter, r *http.Request) {
 		user := app.CurrentUser(r)
 		if !user.IsAdmin {
-			http.Error(w, "forbidden", http.StatusForbidden)
+			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
 		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)

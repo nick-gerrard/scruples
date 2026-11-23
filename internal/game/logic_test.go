@@ -1205,18 +1205,38 @@ func TestPickCardIncludeAI(t *testing.T) {
 		}
 	}
 
+	// Also exercise fallback 3 (classic used, author_id != drawerID): Bob's human card is already used
+	// while unused AI cards exist; includeAI=false must pick Bob's used human card, never an AI card.
+	bob := createUser(t, d, "bob")
+	bobHumanCard := createCard(t, d, bob.ID, "Bob human", "Bob Q?")
+	if _, err := d.Exec(
+		`INSERT INTO rounds (game_id, card_id, drawer_id, status) VALUES (?, ?, ?, 'complete')`,
+		g.ID, bobHumanCard, alice.ID,
+	); err != nil {
+		t.Fatalf("insert round for bob card: %v", err)
+	}
+	for i := range 10 {
+		got, err := pickCard(d, g.ID, alice.ID, "classic", false)
+		if err != nil {
+			t.Fatalf("pickCard fallback3 includeAI=false #%d: %v", i, err)
+		}
+		if got != bobHumanCard {
+			t.Fatalf("pickCard fallback3 includeAI=false #%d = %d, want bobHumanCard %d", i, got, bobHumanCard)
+		}
+	}
+
 	// With includeAI=true, an unused non-drawer AI card IS picked.
 	got, err := pickCard(d, g.ID, alice.ID, "classic", true)
 	if err != nil {
 		t.Fatalf("pickCard includeAI=true: %v", err)
 	}
-	if got == humanCard || got == 0 {
+	if got == humanCard || got == bobHumanCard || got == 0 {
 		t.Fatalf("pickCard includeAI=true = %d, want an AI card (e.g. %d)", got, aiCard1)
 	}
 
 	// If only AI cards remain and includeAI=false, deck appears empty (0).
-	if _, err := d.Exec(`UPDATE cards SET archived_at = datetime('now') WHERE id = ?`, humanCard); err != nil {
-		t.Fatalf("archive humanCard: %v", err)
+	if _, err := d.Exec(`UPDATE cards SET archived_at = datetime('now') WHERE id IN (?, ?)`, humanCard, bobHumanCard); err != nil {
+		t.Fatalf("archive human cards: %v", err)
 	}
 	got, err = pickCard(d, g.ID, alice.ID, "classic", false)
 	if err != nil {
@@ -1224,6 +1244,73 @@ func TestPickCardIncludeAI(t *testing.T) {
 	}
 	if got != 0 {
 		t.Fatalf("pickCard only AI with includeAI=false = %d, want 0", got)
+	}
+}
+
+func TestPostToggleAIHTTP(t *testing.T) {
+	d := openTestDB(t)
+	host := createUser(t, d, "host")
+	player := createUser(t, d, "player")
+	admin := createUser(t, d, "admin")
+	if _, err := d.Exec(`UPDATE users SET is_admin = 1 WHERE id = ?`, admin.ID); err != nil {
+		t.Fatalf("promote admin: %v", err)
+	}
+
+	if err := doStart(d, host, "classic", 5, 60, true); err != nil {
+		t.Fatalf("doStart: %v", err)
+	}
+	if err := doJoin(d, player); err != nil {
+		t.Fatalf("doJoin: %v", err)
+	}
+
+	app := web.NewApp(d)
+	mux := http.NewServeMux()
+	Routes(mux, app)
+
+	cookieFor := func(uid int64) *http.Cookie {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/login", nil)
+		if err := app.CreateSession(rec, req, uid); err != nil {
+			t.Fatalf("CreateSession(%d): %v", uid, err)
+		}
+		return rec.Result().Cookies()[0]
+	}
+
+	postToggle := func(c *http.Cookie) int {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/game/ai-deck", nil)
+		req.AddCookie(c)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	// Non-host POST /game/ai-deck is a no-op.
+	if code := postToggle(cookieFor(player.ID)); code != http.StatusSeeOther {
+		t.Fatalf("player POST /game/ai-deck status = %d, want 303", code)
+	}
+	g, err := activeGame(d)
+	if err != nil || !g.IncludeAI {
+		t.Fatalf("expected include_ai to remain true after non-host POST, got g=%+v err=%v", g, err)
+	}
+
+	// Host POST /game/ai-deck flips include_ai to false.
+	if code := postToggle(cookieFor(host.ID)); code != http.StatusSeeOther {
+		t.Fatalf("host POST /game/ai-deck status = %d, want 303", code)
+	}
+	g, _ = activeGame(d)
+	if g.IncludeAI {
+		t.Fatal("expected include_ai to flip false after host POST")
+	}
+
+	// Admin POST /game/ai-deck flips include_ai back to true.
+	if code := postToggle(cookieFor(admin.ID)); code != http.StatusSeeOther {
+		t.Fatalf("admin POST /game/ai-deck status = %d, want 303", code)
+	}
+	g, _ = activeGame(d)
+	if !g.IncludeAI {
+		t.Fatal("expected include_ai to flip true after admin POST")
 	}
 }
 
