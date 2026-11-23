@@ -122,6 +122,13 @@ ALTER TABLE rounds ADD COLUMN discussion_ends_at TEXT;
 `,
 	},
 	{
+		Version: 5,
+		Name:    "avatars",
+		SQL: `
+ALTER TABLE users ADD COLUMN avatar_path TEXT;
+`,
+	},
+	{
 		Version: 6,
 		Name:    "ai_deck_toggle",
 		SQL: `

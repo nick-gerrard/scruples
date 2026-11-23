@@ -49,7 +49,13 @@ func main() {
 		log.Fatalf("seeding admin user: %v", err)
 	}
 
+	uploadsDir := os.Getenv("SCRUPLES_UPLOADS")
+	if uploadsDir == "" {
+		uploadsDir = "uploads"
+	}
+
 	app := web.NewApp(database)
+	app.UploadsDir = uploadsDir
 	mux := buildMux(app, os.Getenv("SCRUPLES_API_KEY"))
 
 	log.Printf("Scruples listening on %s", addr)

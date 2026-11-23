@@ -6,6 +6,9 @@
 # Built binary
 /scruples
 
+# Uploaded user files (preserved across roost deploys)
+uploads/
+
 # Local tooling
 .claude/*
 !.claude/skills/
