@@ -216,61 +216,51 @@ func TestMigration4Discussion(t *testing.T) {
 }
 
 func TestMigrationsGapTolerance(t *testing.T) {
+	// Production applied 6 (ai_deck_toggle) before 5 (avatars) existed:
+	// build that state, then upgrade with the full list.
 	path := filepath.Join(t.TempDir(), "gaps.db")
-	d, err := Open(path)
+	d, err := sql.Open("sqlite", path)
 	if err != nil {
-		t.Fatalf("Open: %v", err)
+		t.Fatalf("open: %v", err)
 	}
+	d.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = d.Close() })
 
-	// Versions 1, 2, 3, 4, and 6 should be applied with 5 absent.
+	var without5 []migration
+	for _, m := range migrations {
+		if m.Version != 5 {
+			without5 = append(without5, m)
+		}
+	}
+	if err := migrateWith(d, without5); err != nil {
+		t.Fatalf("migrate without 5: %v", err)
+	}
 	applied, err := appliedVersions(d)
 	if err != nil {
 		t.Fatalf("appliedVersions: %v", err)
 	}
-	for _, v := range []int{1, 2, 3, 4, 6} {
-		if !applied[v] {
-			t.Errorf("expected version %d to be applied", v)
+	if applied[5] || !applied[6] {
+		t.Fatalf("setup: applied=%v, want 6 without 5", applied)
+	}
+
+	// The full list applies the missing 5 without re-running 6.
+	if err := migrateWith(d, migrations); err != nil {
+		t.Fatalf("migrate full: %v", err)
+	}
+	applied, err = appliedVersions(d)
+	if err != nil {
+		t.Fatalf("appliedVersions after upgrade: %v", err)
+	}
+	for _, m := range migrations {
+		if !applied[m.Version] {
+			t.Errorf("version %d not applied", m.Version)
 		}
 	}
-	if applied[5] {
-		t.Errorf("did not expect absent version 5 to be applied")
+	var n int
+	if err := d.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('users') WHERE name = 'avatar_path'`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("users.avatar_path present = %d (err %v), want 1", n, err)
 	}
-
-	// Verify games.include_ai exists and defaults to 1.
-	res, err := d.Exec(`INSERT INTO users (username, password_hash) VALUES ('host', 'hash')`)
-	if err != nil {
-		t.Fatalf("insert host: %v", err)
-	}
-	uid, _ := res.LastInsertId()
-	res, err = d.Exec(`INSERT INTO games (mode, point_goal, created_by) VALUES ('classic', 5, ?)`, uid)
-	if err != nil {
-		t.Fatalf("insert game: %v", err)
-	}
-	gid, _ := res.LastInsertId()
-	var includeAI int
-	if err := d.QueryRow(`SELECT include_ai FROM games WHERE id = ?`, gid).Scan(&includeAI); err != nil {
-		t.Fatalf("select include_ai: %v", err)
-	}
-	if includeAI != 1 {
-		t.Fatalf("default include_ai = %d, want 1", includeAI)
-	}
-
-	// Later introducing an in-between version (5) must apply cleanly without re-running 6.
-	withGapFilled := append([]migration{}, migrations...)
-	withGapFilled = append(withGapFilled, migration{
-		Version: 5,
-		Name:    "later_backfill_test",
-		SQL:     `CREATE TABLE gap_backfill_check (id INTEGER PRIMARY KEY);`,
-	})
-	if err := migrateWith(d, withGapFilled); err != nil {
-		t.Fatalf("migrateWith gap filled: %v", err)
-	}
-	applied2, err := appliedVersions(d)
-	if err != nil {
-		t.Fatalf("appliedVersions after backfill: %v", err)
-	}
-	if !applied2[5] || !applied2[6] {
-		t.Fatalf("expected versions 5 and 6 to be applied, got %v", applied2)
+	if err := d.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('games') WHERE name = 'include_ai'`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("games.include_ai present = %d (err %v), want 1", n, err)
 	}
 }
