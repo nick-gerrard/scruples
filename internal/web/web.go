@@ -14,6 +14,7 @@ import (
 // funcs are helpers available in all templates.
 var funcs = template.FuncMap{
 	"hasPrefix": strings.HasPrefix,
+	"avatar":    avatar,
 }
 
 // User is the logged-in user attached to a request.

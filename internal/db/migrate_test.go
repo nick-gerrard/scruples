@@ -157,3 +157,60 @@ func TestMigration3FailsIfNonBotClaudeExists(t *testing.T) {
 		t.Fatalf("expected clear error mentioning Claude and non-bot, got: %v", err)
 	}
 }
+
+func TestMigration4Discussion(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "discuss.db")
+	d, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = d.Close() })
+
+	var name string
+	if err := d.QueryRow(`SELECT name FROM schema_migrations WHERE version = 4`).Scan(&name); err != nil {
+		t.Fatalf("migration 4 not recorded: %v", err)
+	}
+	if name != "discussion" {
+		t.Fatalf("migration 4 name = %q, want discussion", name)
+	}
+
+	res, err := d.Exec(`INSERT INTO users (username, password_hash) VALUES ('alice', 'hash')`)
+	if err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	uid, _ := res.LastInsertId()
+
+	res, err = d.Exec(`INSERT INTO cards (author_id, circumstance, question) VALUES (?, 'Scene', 'Question?')`, uid)
+	if err != nil {
+		t.Fatalf("insert card: %v", err)
+	}
+	cid, _ := res.LastInsertId()
+
+	res, err = d.Exec(`INSERT INTO games (mode, point_goal, created_by) VALUES ('classic', 5, ?)`, uid)
+	if err != nil {
+		t.Fatalf("insert game: %v", err)
+	}
+	gid, _ := res.LastInsertId()
+
+	var ds int
+	if err := d.QueryRow(`SELECT discussion_seconds FROM games WHERE id = ?`, gid).Scan(&ds); err != nil {
+		t.Fatalf("select discussion_seconds: %v", err)
+	}
+	if ds != 60 {
+		t.Fatalf("default discussion_seconds = %d, want 60", ds)
+	}
+
+	res, err = d.Exec(`INSERT INTO rounds (game_id, card_id, drawer_id) VALUES (?, ?, ?)`, gid, cid, uid)
+	if err != nil {
+		t.Fatalf("insert round: %v", err)
+	}
+	rid, _ := res.LastInsertId()
+
+	var compAt, discEnd sql.NullString
+	if err := d.QueryRow(`SELECT completed_at, discussion_ends_at FROM rounds WHERE id = ?`, rid).Scan(&compAt, &discEnd); err != nil {
+		t.Fatalf("select round discussion columns: %v", err)
+	}
+	if compAt.Valid || discEnd.Valid {
+		t.Fatalf("expected NULL completed_at/discussion_ends_at, got (%v, %v)", compAt, discEnd)
+	}
+}

@@ -3,14 +3,74 @@ package game
 import (
 	"database/sql"
 	"errors"
+	"time"
 
 	"scruples/internal/web"
 )
 
+// TimerOption is an allowed discussion window duration.
+type TimerOption struct {
+	Seconds int
+	Label   string
+}
+
+var discussionOptions = []TimerOption{
+	{Seconds: 0, Label: "Off"},
+	{Seconds: 30, Label: "30s"},
+	{Seconds: 60, Label: "60s"},
+	{Seconds: 90, Label: "90s"},
+	{Seconds: 120, Label: "2m"},
+	{Seconds: 180, Label: "3m"},
+}
+
+func validDiscussionSeconds(n int) bool {
+	for _, opt := range discussionOptions {
+		if opt.Seconds == n {
+			return true
+		}
+	}
+	return false
+}
+
+// nowFunc is the clock used for discussion windows; overridable in tests.
+var nowFunc = func() time.Time { return time.Now().UTC() }
+
+func formatTime(t time.Time) string {
+	return t.UTC().Format(time.DateTime)
+}
+
+func parseTime(s string) (time.Time, bool) {
+	if s == "" {
+		return time.Time{}, false
+	}
+	if t, err := time.Parse(time.DateTime, s); err == nil {
+		return t.UTC(), true
+	}
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t.UTC(), true
+	}
+	return time.Time{}, false
+}
+
+func isHost(g *gameRow, u *web.User) bool {
+	return u.ID == g.CreatedBy || u.IsAdmin
+}
+
+func discussionOpen(rd *roundRow, now time.Time) bool {
+	if rd == nil || rd.Status != "complete" || rd.DiscussionEndsAt == "" {
+		return false
+	}
+	endsAt, ok := parseTime(rd.DiscussionEndsAt)
+	if !ok {
+		return false
+	}
+	return now.UTC().Before(endsAt)
+}
+
 // doStart creates a new game if none is active. The creator auto-joins with
 // turn_order 1. Silently a no-op if a game is already running (race-safe:
 // the check and insert share one transaction, and the pool has one conn).
-func doStart(db *sql.DB, u *web.User, mode string, pointGoal int) error {
+func doStart(db *sql.DB, u *web.User, mode string, pointGoal, discussionSeconds int) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return err
@@ -29,8 +89,8 @@ func doStart(db *sql.DB, u *web.User, mode string, pointGoal int) error {
 		goal = pointGoal
 	}
 	res, err := tx.Exec(
-		`INSERT INTO games (mode, point_goal, created_by) VALUES (?, ?, ?)`,
-		mode, goal, u.ID)
+		`INSERT INTO games (mode, point_goal, created_by, discussion_seconds) VALUES (?, ?, ?, ?)`,
+		mode, goal, u.ID, discussionSeconds)
 	if err != nil {
 		return err
 	}
@@ -114,7 +174,7 @@ func pickCard(q querier, gameID, drawerID int64, mode string) (int64, error) {
 }
 
 // doDraw opens a new round. Returns a user-facing message for soft failures
-// (currently only an empty deck).
+// (discussion still open, or an empty deck).
 func doDraw(db *sql.DB, u *web.User) (string, error) {
 	tx, err := db.Begin()
 	if err != nil {
@@ -128,6 +188,9 @@ func doDraw(db *sql.DB, u *web.User) (string, error) {
 	}
 	if g == nil || (rd != nil && rd.Status != "complete") {
 		return "", nil
+	}
+	if discussionOpen(rd, nowFunc()) {
+		return "Discussion is still open.", nil
 	}
 	players, err := loadPlayers(tx, g.ID)
 	if err != nil {
@@ -232,7 +295,8 @@ func awardAndFinish(tx *sql.Tx, g *gameRow, rd *roundRow, final string) error {
 }
 
 // doNext accepts a revealed round: classic locks in the drawer's answer as
-// final and scores it; freeplay simply completes the round.
+// final and scores it; freeplay simply completes the round. Sets completed_at
+// and discussion_ends_at according to the game's discussion_seconds.
 func doNext(db *sql.DB, u *web.User) error {
 	tx, err := db.Begin()
 	if err != nil {
@@ -251,13 +315,19 @@ func doNext(db *sql.DB, u *web.User) error {
 	if err != nil || !joined {
 		return err
 	}
+	now := nowFunc().UTC()
+	completedAt := formatTime(now)
+	endsAt := formatTime(now.Add(time.Duration(g.DiscussionSeconds) * time.Second))
+
 	if g.Mode == "classic" {
 		if rd.DrawerAnswer == "" {
 			return nil
 		}
 		res, err := tx.Exec(
-			`UPDATE rounds SET status = 'complete', final_answer = drawer_answer
-			 WHERE id = ? AND status = 'revealed'`, rd.ID)
+			`UPDATE rounds
+			 SET status = 'complete', final_answer = drawer_answer, completed_at = ?, discussion_ends_at = ?
+			 WHERE id = ? AND status = 'revealed'`,
+			completedAt, endsAt, rd.ID)
 		if err != nil {
 			return err
 		}
@@ -270,7 +340,10 @@ func doNext(db *sql.DB, u *web.User) error {
 		}
 	} else {
 		if _, err := tx.Exec(
-			`UPDATE rounds SET status = 'complete' WHERE id = ? AND status = 'revealed'`, rd.ID); err != nil {
+			`UPDATE rounds
+			 SET status = 'complete', completed_at = ?, discussion_ends_at = ?
+			 WHERE id = ? AND status = 'revealed'`,
+			completedAt, endsAt, rd.ID); err != nil {
 			return err
 		}
 	}
@@ -279,7 +352,8 @@ func doNext(db *sql.DB, u *web.User) error {
 
 // maybeResolveChallenge resolves a challenge once every eligible non-drawer
 // has re-voted: a strict majority contradicting the drawer flips the answer;
-// a tie or majority agreeing lets it stand. Then scores initial votes.
+// a tie or majority agreeing lets it stand. Then scores initial votes and opens
+// the discussion window.
 func maybeResolveChallenge(db *sql.DB, g *gameRow) error {
 	tx, err := db.Begin()
 	if err != nil {
@@ -293,6 +367,10 @@ func maybeResolveChallenge(db *sql.DB, g *gameRow) error {
 	}
 	if rd == nil || rd.Status != "challenge" || rd.DrawerAnswer == "" {
 		return nil
+	}
+	var discussionSeconds int
+	if err := tx.QueryRow(`SELECT discussion_seconds FROM games WHERE id = ?`, g.ID).Scan(&discussionSeconds); err != nil {
+		return err
 	}
 	var elig, voted int
 	if err := tx.QueryRow(
@@ -330,9 +408,14 @@ func maybeResolveChallenge(db *sql.DB, g *gameRow) error {
 	if flip > agree {
 		final = flipped
 	}
+	now := nowFunc().UTC()
+	completedAt := formatTime(now)
+	endsAt := formatTime(now.Add(time.Duration(discussionSeconds) * time.Second))
 	res, err := tx.Exec(
-		`UPDATE rounds SET status = 'complete', final_answer = ?
-		 WHERE id = ? AND status = 'challenge'`, final, rd.ID)
+		`UPDATE rounds
+		 SET status = 'complete', final_answer = ?, completed_at = ?, discussion_ends_at = ?
+		 WHERE id = ? AND status = 'challenge'`,
+		final, completedAt, endsAt, rd.ID)
 	if err != nil {
 		return err
 	}
@@ -342,6 +425,82 @@ func maybeResolveChallenge(db *sql.DB, g *gameRow) error {
 		return nil
 	}
 	if err := awardAndFinish(tx, g, rd, final); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// doSkipDiscussion ends the active discussion window immediately. Host or admin only.
+func doSkipDiscussion(db *sql.DB, u *web.User) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	g, rd, err := loadCurrent(tx)
+	if err != nil || g == nil || !isHost(g, u) {
+		return err
+	}
+	now := nowFunc().UTC()
+	if !discussionOpen(rd, now) {
+		return nil
+	}
+	if _, err := tx.Exec(
+		`UPDATE rounds SET discussion_ends_at = ? WHERE id = ? AND status = 'complete'`,
+		formatTime(now), rd.ID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// doExtendDiscussion adds 30 seconds to an open discussion window. Host or admin only.
+func doExtendDiscussion(db *sql.DB, u *web.User) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	g, rd, err := loadCurrent(tx)
+	if err != nil || g == nil || !isHost(g, u) {
+		return err
+	}
+	now := nowFunc().UTC()
+	if !discussionOpen(rd, now) {
+		return nil
+	}
+	endsAt, ok := parseTime(rd.DiscussionEndsAt)
+	if !ok {
+		return nil
+	}
+	newEnds := endsAt.Add(30 * time.Second)
+	if _, err := tx.Exec(
+		`UPDATE rounds SET discussion_ends_at = ? WHERE id = ? AND status = 'complete'`,
+		formatTime(newEnds), rd.ID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// doSetDiscussionSeconds updates the active game's discussion_seconds setting. Host or admin only.
+func doSetDiscussionSeconds(db *sql.DB, u *web.User, seconds int) error {
+	if !validDiscussionSeconds(seconds) {
+		return nil
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	g, err := activeGame(tx)
+	if err != nil || g == nil || !isHost(g, u) {
+		return err
+	}
+	if _, err := tx.Exec(
+		`UPDATE games SET discussion_seconds = ? WHERE id = ? AND status = 'active'`,
+		seconds, g.ID); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -360,7 +519,7 @@ func doEnd(db *sql.DB, u *web.User) error {
 	if err != nil || g == nil {
 		return err
 	}
-	if u.ID != g.CreatedBy && !u.IsAdmin {
+	if !isHost(g, u) {
 		return nil
 	}
 	if g.Mode == "classic" {

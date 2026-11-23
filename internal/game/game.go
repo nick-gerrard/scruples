@@ -56,7 +56,27 @@ func Routes(mux *http.ServeMux, app *web.App) {
 			serverErr(w, err)
 			return
 		}
+		if v := r.URL.Query().Get("v"); v != "" && v == view.StateVersion {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		app.RenderFragment(w, "game.html", "game-state", pageData{User: u, Data: view, Path: "/game"})
+	}))
+
+	mux.HandleFunc("GET /game/rounds", app.RequireUser(func(w http.ResponseWriter, r *http.Request) {
+		tab := r.URL.Query().Get("tab")
+		var selectedID int64
+		if raw := strings.TrimSpace(r.URL.Query().Get("round")); raw != "" {
+			if n, err := strconv.ParseInt(raw, 10, 64); err == nil && n > 0 {
+				selectedID = n
+			}
+		}
+		sheet, err := buildHistorySheet(app.DB, tab, selectedID)
+		if err != nil {
+			serverErr(w, err)
+			return
+		}
+		app.RenderFragment(w, "game.html", "history-sheet-body", sheet)
 	}))
 
 	mux.HandleFunc("POST /game/start", app.RequireUser(func(w http.ResponseWriter, r *http.Request) {
@@ -77,7 +97,16 @@ func Routes(mux *http.ServeMux, app *web.App) {
 				pointGoal = n
 			}
 		}
-		if err := doStart(app.DB, u, mode, pointGoal); err != nil {
+		discussionSeconds := 60
+		if ds := strings.TrimSpace(r.FormValue("discussion_seconds")); ds != "" {
+			n, err := strconv.Atoi(ds)
+			if err != nil || !validDiscussionSeconds(n) {
+				respond(app, w, r, "Pick a valid discussion timer.")
+				return
+			}
+			discussionSeconds = n
+		}
+		if err := doStart(app.DB, u, mode, pointGoal, discussionSeconds); err != nil {
 			serverErr(w, err)
 			return
 		}
@@ -250,6 +279,36 @@ func Routes(mux *http.ServeMux, app *web.App) {
 
 	mux.HandleFunc("POST /game/next", app.RequireUser(func(w http.ResponseWriter, r *http.Request) {
 		if err := doNext(app.DB, app.CurrentUser(r)); err != nil {
+			serverErr(w, err)
+			return
+		}
+		respond(app, w, r, "")
+	}))
+
+	mux.HandleFunc("POST /game/discussion/skip", app.RequireUser(func(w http.ResponseWriter, r *http.Request) {
+		if err := doSkipDiscussion(app.DB, app.CurrentUser(r)); err != nil {
+			serverErr(w, err)
+			return
+		}
+		respond(app, w, r, "")
+	}))
+
+	mux.HandleFunc("POST /game/discussion/extend", app.RequireUser(func(w http.ResponseWriter, r *http.Request) {
+		if err := doExtendDiscussion(app.DB, app.CurrentUser(r)); err != nil {
+			serverErr(w, err)
+			return
+		}
+		respond(app, w, r, "")
+	}))
+
+	mux.HandleFunc("POST /game/discussion/duration", app.RequireUser(func(w http.ResponseWriter, r *http.Request) {
+		raw := strings.TrimSpace(r.FormValue("discussion_seconds"))
+		n, err := strconv.Atoi(raw)
+		if err != nil || !validDiscussionSeconds(n) {
+			http.Error(w, "bad discussion_seconds", http.StatusBadRequest)
+			return
+		}
+		if err := doSetDiscussionSeconds(app.DB, app.CurrentUser(r), n); err != nil {
 			serverErr(w, err)
 			return
 		}

@@ -25,5 +25,12 @@
   </nav>
   {{end}}
   <main class="max-w-2xl mx-auto px-4 py-6">{{template "content" .}}</main>
+  <script>
+    document.addEventListener('htmx:responseError', function (e) {
+      if (e.detail && e.detail.xhr && e.detail.xhr.status === 401) {
+        window.location.reload();
+      }
+    });
+  </script>
 </body>
 </html>{{end}}

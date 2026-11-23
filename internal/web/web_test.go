@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"scruples/internal/db"
@@ -87,5 +88,20 @@ func TestSessionCookieSecureFlag(t *testing.T) {
 				t.Errorf("DestroySession Secure = %v, want %v", cleared[0].Secure, tc.wantSecure)
 			}
 		})
+	}
+}
+
+func TestAvatarHelper(t *testing.T) {
+	got := string(avatar(7, "alice", 28))
+	if !strings.Contains(got, ">A</span>") {
+		t.Fatalf("avatar initial missing: %s", got)
+	}
+	if !strings.Contains(got, "width:28px;height:28px") {
+		t.Fatalf("avatar size missing: %s", got)
+	}
+
+	escaped := string(avatar(2, `<script>x</script>`, 24))
+	if strings.Contains(escaped, "<script>") {
+		t.Fatalf("avatar did not escape name: %s", escaped)
 	}
 }
