@@ -117,10 +117,10 @@ func TestStaticAssets(t *testing.T) {
 	mux := buildMux(web.NewApp(database), "")
 
 	for _, tc := range []struct {
-		path        string
-		wantStatus  int
-		wantType    string
-		wantCache   string
+		path       string
+		wantStatus int
+		wantType   string
+		wantCache  string
 	}{
 		{"/static/brand/logo.svg?v=1", http.StatusOK, "image/svg+xml", "max-age=31536000, immutable"},
 		{"/static/brand/logo.svg", http.StatusOK, "image/svg+xml", "max-age=86400"},
