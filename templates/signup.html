@@ -1,31 +1,29 @@
 {{define "title"}}Sign up{{end}}
 
 {{define "content"}}
-<div class="flex min-h-[70vh] items-center justify-center">
-  <div class="w-full max-w-sm rounded-2xl border border-slate-800 bg-slate-900 p-8">
+<div class="flex min-h-[75vh] items-center justify-center">
+  <div class="w-full max-w-sm">
     <div class="mb-6 text-center">
-      <div class="text-4xl font-extrabold tracking-tight text-indigo-400">Scruples</div>
-      <div class="mt-1 text-sm text-slate-400">the game of moral dilemmas</div>
+      <img src="/static/brand/logo.svg?v=1" alt="" width="72" height="72" class="mx-auto h-[72px] w-[72px]">
+      <div class="mt-3 text-4xl font-extrabold tracking-tight text-primary-soft">Scruples</div>
+      <div class="mt-1 text-sm text-muted">the game of moral dilemmas</div>
     </div>
 
-    {{if .Data.Error}}
-    <p class="mb-4 rounded-xl bg-red-500/10 px-4 py-3 text-sm text-red-400">{{.Data.Error}}</p>
-    {{end}}
+    <div class="card p-6 sm:p-8">
+      {{if .Data.Error}}
+      <p class="alert alert-error mb-4">{{.Data.Error}}</p>
+      {{end}}
 
-    <form method="post" action="/signup" class="space-y-4">
-      <input type="text" name="username" value="{{.Data.Username}}" placeholder="Username" required autocomplete="username"
-             class="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 text-slate-100 placeholder-slate-500 focus:border-indigo-500 focus:outline-none">
-      <input type="password" name="password" placeholder="Password (6+ characters)" required autocomplete="new-password"
-             class="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 text-slate-100 placeholder-slate-500 focus:border-indigo-500 focus:outline-none">
-      <button type="submit"
-              class="w-full rounded-xl bg-indigo-600 py-3 font-semibold text-white transition hover:bg-indigo-500 active:scale-[0.99]">
-        Sign up
-      </button>
-    </form>
+      <form method="post" action="/signup" class="space-y-4">
+        <input type="text" name="username" value="{{.Data.Username}}" placeholder="Username" aria-label="Username" required autocomplete="username" autocapitalize="none" autocorrect="off" class="field">
+        <input type="password" name="password" placeholder="Password (6+ characters)" aria-label="Password" required autocomplete="new-password" class="field">
+        <button type="submit" class="btn btn-primary">Sign up</button>
+      </form>
 
-    <p class="mt-6 text-center text-sm text-slate-400">
-      Already playing? <a href="/login" class="font-medium text-indigo-400 hover:text-indigo-300">Log in</a>
-    </p>
+      <p class="mt-5 text-center text-sm text-muted">
+        Already playing? <a href="/login" class="inline-flex min-h-[44px] items-center px-1 font-semibold text-primary-soft hover:text-primary-bright">Log in</a>
+      </p>
+    </div>
   </div>
 </div>
 {{end}}

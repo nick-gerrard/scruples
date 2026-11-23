@@ -2,38 +2,161 @@
 <html lang="en" class="h-full">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#020617">
+  <meta name="color-scheme" content="dark">
   <title>{{template "title" .}} · Scruples</title>
+  <link rel="icon" type="image/svg+xml" href="/static/brand/favicon.svg?v=1">
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/brand/favicon-32.png?v=1">
+  <link rel="apple-touch-icon" href="/static/brand/apple-touch-icon.png?v=1">
+  <link rel="manifest" href="/static/brand/site.webmanifest?v=1">
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    // The whole theme lives here. Every colour is a semantic token; shades are
+    // DEFAULT (600, solid fills), line (500, borders), soft (400, text on dark),
+    // bright (300) and pale (200).
+    window.scColors = {
+      page: '#020617',
+      surface: '#0f172a',
+      raised: '#1e293b',
+      line: { DEFAULT: '#1e293b', strong: '#334155' },
+      ink: { DEFAULT: '#f1f5f9', dim: '#cbd5e1' },
+      muted: { DEFAULT: '#94a3b8', dim: '#64748b' },
+      primary: { DEFAULT: '#4f46e5', line: '#6366f1', soft: '#818cf8', bright: '#a5b4fc', pale: '#c7d2fe' },
+      yes: { DEFAULT: '#059669', line: '#10b981', soft: '#34d399', bright: '#6ee7b7', pale: '#a7f3d0' },
+      no: { DEFAULT: '#e11d48', line: '#f43f5e', soft: '#fb7185', bright: '#fda4af', pale: '#fecdd3' },
+      challenge: { DEFAULT: '#d97706', line: '#f59e0b', soft: '#fbbf24', bright: '#fcd34d', pale: '#fde68a' },
+      freeplay: { DEFAULT: '#7c3aed', line: '#8b5cf6', soft: '#a78bfa', bright: '#c4b5fd', pale: '#ddd6fe' }
+    };
+    tailwind.config = { theme: { extend: { colors: window.scColors } } };
+  </script>
+  <style type="text/tailwindcss">
+    @layer base {
+      html { -webkit-tap-highlight-color: transparent; background-color: theme('colors.page'); }
+      body { overflow-wrap: break-word; }
+      @media (prefers-reduced-motion: reduce) {
+        *, ::before, ::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+      }
+    }
+    @layer components {
+      .card { @apply rounded-2xl border border-line bg-surface p-5; }
+      .card-link { @apply block rounded-2xl border border-line bg-surface p-5 transition hover:border-line-strong hover:bg-raised/50 active:scale-[0.99]; }
+      .page-title { @apply text-2xl font-extrabold tracking-tight sm:text-3xl; }
+      .page-sub { @apply mt-1 text-sm text-muted sm:text-base; }
+      .btn { @apply inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-base font-semibold text-white transition active:scale-[0.98]; }
+      .btn-primary { @apply bg-primary hover:bg-primary-line; }
+      .btn-secondary { @apply border border-line-strong bg-raised text-ink hover:bg-line-strong; }
+      .btn-yes { @apply bg-yes hover:bg-yes-line; }
+      .btn-no { @apply bg-no hover:bg-no-line; }
+      .btn-challenge { @apply bg-challenge hover:bg-challenge-line; }
+      .btn-lg { @apply min-h-[56px] text-lg font-bold; }
+      .btn-xl { @apply min-h-[64px] text-xl font-extrabold; }
+      .btn-sm { @apply min-h-[44px] w-auto px-4 py-2 text-sm; }
+      .field { @apply min-h-[48px] w-full rounded-xl border border-line-strong bg-raised px-4 py-3 text-base text-ink transition placeholder:text-muted-dim focus:border-primary-line focus:outline-none focus:ring-2 focus:ring-primary-line/30; }
+      .label { @apply mb-1.5 block text-sm font-medium text-ink-dim; }
+      .alert { @apply rounded-xl border px-4 py-3 text-sm; }
+      .alert-error { @apply border-no-line/30 bg-no-line/10 text-no-bright; }
+      .alert-success { @apply border-yes-line/30 bg-yes-line/10 text-yes-bright; }
+      .badge { @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-bold; }
+      .badge-ai { @apply inline-flex items-center rounded-full border border-freeplay-line/30 bg-freeplay-line/10 px-2.5 py-0.5 text-[11px] font-medium text-freeplay-bright; }
+      .chip { @apply inline-flex min-h-[44px] items-center justify-center rounded-full border px-3.5 text-sm font-medium transition active:scale-[0.97]; }
+      .chip-on { @apply border-primary-line/60 bg-primary/20 text-primary-bright; }
+      .chip-off { @apply border-line bg-surface text-muted hover:text-ink; }
+      .nav-link { @apply inline-flex min-h-[44px] items-center rounded-xl px-3.5 text-sm font-semibold transition; }
+      .nav-link-on { @apply bg-primary/20 text-primary-bright; }
+      .nav-link-off { @apply text-ink-dim hover:bg-raised hover:text-ink; }
+      .tab { @apply flex min-h-[56px] flex-col items-center justify-center gap-0.5 text-[11px] font-semibold transition active:scale-95; }
+      .tab-on { @apply text-primary-bright; }
+      .tab-off { @apply text-muted; }
+      .menu-item { @apply flex min-h-[44px] w-full items-center gap-3 rounded-xl px-3 text-left text-sm font-medium text-ink-dim transition hover:bg-raised hover:text-ink; }
+      .empty { @apply rounded-2xl border border-dashed border-line-strong bg-surface/50 p-8 text-center; }
+    }
+    @keyframes pop-in { from { opacity: 0; transform: translateY(-4px) scale(0.98); } to { opacity: 1; transform: none; } }
+    @keyframes sheet-in { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+    .anim-pop { animation: pop-in 0.12s ease-out; }
+    .anim-sheet { animation: sheet-in 0.2s ease-out; }
+  </style>
 </head>
-<body class="min-h-full bg-slate-950 text-slate-100 antialiased">
+<body class="min-h-full bg-page text-ink antialiased">
   {{if .User}}
-  <nav class="sticky top-0 z-10 border-b border-slate-800 bg-slate-950/90 backdrop-blur">
-    <div class="mx-auto flex max-w-2xl items-center gap-4 px-4 py-3 text-sm">
-      <a href="/" class="text-lg font-extrabold tracking-tight text-indigo-400">Scruples</a>
-      <div class="flex flex-1 items-center gap-3 overflow-x-auto whitespace-nowrap">
-        <a href="/cards" class="rounded-lg px-2 py-1 font-medium {{if hasPrefix .Path "/cards"}}bg-indigo-600/20 text-indigo-300{{else}}text-slate-300 hover:text-indigo-300{{end}}">Deck</a>
-        <a href="/game" class="rounded-lg px-2 py-1 font-medium {{if hasPrefix .Path "/game"}}bg-indigo-600/20 text-indigo-300{{else}}text-slate-300 hover:text-indigo-300{{end}}">Play</a>
-        <a href="/winners" class="rounded-lg px-2 py-1 font-medium {{if hasPrefix .Path "/winners"}}bg-indigo-600/20 text-indigo-300{{else}}text-slate-300 hover:text-indigo-300{{end}}">Winners</a>
-      </div>
-      <a href="/account" class="flex shrink-0 items-center gap-1.5 text-xs {{if hasPrefix .Path "/account"}}text-indigo-300{{else}}text-slate-400 hover:text-slate-200{{end}}" title="{{.User.Username}}">
-        {{avatar .User.ID .User.Username 28}}
-        <span class="hidden sm:inline">{{.User.Username}}</span>
+  <header class="sticky top-0 z-30 border-b border-line bg-page/90 backdrop-blur">
+    <div class="mx-auto flex h-14 max-w-2xl items-center gap-2 px-4">
+      <a href="/" class="-ml-2 flex min-h-[44px] items-center gap-2.5 rounded-xl px-2" aria-label="Scruples home">
+        <img src="/static/brand/logo.svg?v=1" alt="" width="32" height="32" class="h-8 w-8">
+        <span class="text-lg font-extrabold tracking-tight text-ink">Scruples</span>
       </a>
-      <form method="post" action="/logout">
-        <button type="submit" class="text-xs text-slate-400 hover:text-slate-200">Log out</button>
-      </form>
+      <nav class="ml-3 hidden flex-1 items-center gap-1 sm:flex" aria-label="Main">
+        <a href="/cards" class="nav-link {{if hasPrefix .Path "/cards"}}nav-link-on{{else}}nav-link-off{{end}}">Deck</a>
+        <a href="/game" class="nav-link {{if hasPrefix .Path "/game"}}nav-link-on{{else}}nav-link-off{{end}}">Play</a>
+        <a href="/winners" class="nav-link {{if hasPrefix .Path "/winners"}}nav-link-on{{else}}nav-link-off{{end}}">Winners</a>
+      </nav>
+      <div class="relative ml-auto" id="user-menu">
+        <button type="button" id="user-menu-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="user-menu-panel" aria-label="Account menu for {{.User.Username}}"
+                class="flex h-11 w-11 items-center justify-center rounded-full transition active:scale-95">
+          <span class="rounded-full ring-2 {{if hasPrefix .Path "/account"}}ring-primary-line{{else}}ring-line-strong{{end}}">{{avatar .User.ID .User.Username 34}}</span>
+        </button>
+        <div id="user-menu-panel" role="menu" hidden class="anim-pop absolute right-0 top-full z-40 mt-2 w-56 rounded-2xl border border-line-strong bg-surface p-1.5 shadow-2xl shadow-black/50">
+          <div class="truncate px-3 pb-2 pt-1.5 text-xs text-muted">Signed in as <span class="font-semibold text-ink">{{.User.Username}}</span></div>
+          <a href="/account" role="menuitem" class="menu-item">
+            <svg class="h-5 w-5 shrink-0 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+            Account
+          </a>
+          <form method="post" action="/logout">
+            <button type="submit" role="menuitem" class="menu-item">
+              <svg class="h-5 w-5 shrink-0 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 17l-5-5 5-5"/><path d="M5 12h11"/></svg>
+              Log out
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </header>
+  {{end}}
+  <main class="mx-auto max-w-2xl px-4 py-6{{if .User}} pb-28 sm:pb-10{{end}}">{{template "content" .}}</main>
+  {{if .User}}
+  <nav class="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-page/95 pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden" aria-label="Main">
+    <div class="mx-auto grid max-w-2xl grid-cols-3">
+      <a href="/cards" class="tab {{if hasPrefix .Path "/cards"}}tab-on{{else}}tab-off{{end}}" {{if hasPrefix .Path "/cards"}}aria-current="page"{{end}}>
+        <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="7" width="12" height="14" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-2"/></svg>
+        Deck
+      </a>
+      <a href="/game" class="tab {{if hasPrefix .Path "/game"}}tab-on{{else}}tab-off{{end}}" {{if hasPrefix .Path "/game"}}aria-current="page"{{end}}>
+        <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M10 8.5v7l6-3.5z"/></svg>
+        Play
+      </a>
+      <a href="/winners" class="tab {{if hasPrefix .Path "/winners"}}tab-on{{else}}tab-off{{end}}" {{if hasPrefix .Path "/winners"}}aria-current="page"{{end}}>
+        <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 4h8v6a4 4 0 0 1-8 0z"/><path d="M8 6H5a1 1 0 0 0-1 1c0 2.5 1.5 4 4 4M16 6h3a1 1 0 0 1 1 1c0 2.5-1.5 4-4 4"/><path d="M12 14v4M9 20h6"/></svg>
+        Winners
+      </a>
     </div>
   </nav>
   {{end}}
-  <main class="max-w-2xl mx-auto px-4 py-6">{{template "content" .}}</main>
   <script>
     document.addEventListener('htmx:responseError', function (e) {
       if (e.detail && e.detail.xhr && e.detail.xhr.status === 401) {
         window.location.reload();
       }
     });
+    (function () {
+      var btn = document.getElementById('user-menu-btn');
+      var panel = document.getElementById('user-menu-panel');
+      if (!btn || !panel) return;
+      function setOpen(open) {
+        panel.hidden = !open;
+        btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      }
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        setOpen(panel.hidden);
+      });
+      document.addEventListener('click', function (e) {
+        if (!panel.hidden && !panel.contains(e.target)) setOpen(false);
+      });
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && !panel.hidden) { setOpen(false); btn.focus(); }
+      });
+    })();
   </script>
 </body>
 </html>{{end}}

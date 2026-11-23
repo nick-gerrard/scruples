@@ -3,22 +3,37 @@
 {{define "content"}}
 <div class="space-y-6">
   <div>
-    <h1 class="text-3xl font-extrabold tracking-tight">Hey {{.User.Username}}</h1>
-    <p class="mt-1 text-slate-400">Crowdsourced moral dilemmas — write them, then find out what your friends would really do.</p>
+    <h1 class="page-title">Hey {{.User.Username}}</h1>
+    <p class="page-sub">Crowdsourced moral dilemmas — write them, then find out what your friends would really do.</p>
   </div>
 
-  <div class="space-y-4">
-    <a href="/cards" class="block rounded-2xl border border-slate-800 bg-slate-900 p-5 transition hover:border-indigo-500/60 hover:bg-slate-900/70 active:scale-[0.99]">
-      <div class="text-xl font-bold text-indigo-300">The Deck</div>
-      <div class="mt-1 text-sm text-slate-400">Read &amp; write dilemmas</div>
+  <div class="space-y-3">
+    <a href="/game" class="card-link flex items-center gap-4 hover:border-freeplay-line/60">
+      <span class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-freeplay-line/15 text-freeplay-bright">
+        <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M10 8.5v7l6-3.5z"/></svg>
+      </span>
+      <span class="min-w-0">
+        <span class="block text-xl font-bold text-freeplay-bright">Play</span>
+        <span class="mt-0.5 block text-sm text-muted">The communal game</span>
+      </span>
     </a>
-    <a href="/game" class="block rounded-2xl border border-slate-800 bg-slate-900 p-5 transition hover:border-violet-500/60 hover:bg-slate-900/70 active:scale-[0.99]">
-      <div class="text-xl font-bold text-violet-300">Play</div>
-      <div class="mt-1 text-sm text-slate-400">The communal game</div>
+    <a href="/cards" class="card-link flex items-center gap-4 hover:border-primary-line/60">
+      <span class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary-line/15 text-primary-bright">
+        <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="7" width="12" height="14" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-2"/></svg>
+      </span>
+      <span class="min-w-0">
+        <span class="block text-xl font-bold text-primary-bright">The Deck</span>
+        <span class="mt-0.5 block text-sm text-muted">Read &amp; write dilemmas</span>
+      </span>
     </a>
-    <a href="/winners" class="block rounded-2xl border border-slate-800 bg-slate-900 p-5 transition hover:border-indigo-500/60 hover:bg-slate-900/70 active:scale-[0.99]">
-      <div class="text-xl font-bold text-indigo-300">Hall of Fame</div>
-      <div class="mt-1 text-sm text-slate-400">Past winners &amp; glory</div>
+    <a href="/winners" class="card-link flex items-center gap-4 hover:border-challenge-line/60">
+      <span class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-challenge-line/15 text-challenge-bright">
+        <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 4h8v6a4 4 0 0 1-8 0z"/><path d="M8 6H5a1 1 0 0 0-1 1c0 2.5 1.5 4 4 4M16 6h3a1 1 0 0 1 1 1c0 2.5-1.5 4-4 4"/><path d="M12 14v4M9 20h6"/></svg>
+      </span>
+      <span class="min-w-0">
+        <span class="block text-xl font-bold text-challenge-bright">Hall of Fame</span>
+        <span class="mt-0.5 block text-sm text-muted">Past winners &amp; glory</span>
+      </span>
     </a>
   </div>
 </div>
