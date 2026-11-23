@@ -12,6 +12,18 @@ import (
 	"scruples/internal/web"
 )
 
+func buildMux(app *web.App) *http.ServeMux {
+	mux := http.NewServeMux()
+	auth.Routes(mux, app)
+	cards.Routes(mux, app)
+	game.Routes(mux, app)
+
+	mux.HandleFunc("GET /{$}", app.RequireUser(func(w http.ResponseWriter, r *http.Request) {
+		app.Render(w, r, "home.html", nil)
+	}))
+	return mux
+}
+
 func main() {
 	addr := os.Getenv("SCRUPLES_ADDR")
 	if addr == "" {
@@ -38,15 +50,7 @@ func main() {
 	}
 
 	app := web.NewApp(database)
-
-	mux := http.NewServeMux()
-	auth.Routes(mux, app)
-	cards.Routes(mux, app)
-	game.Routes(mux, app)
-
-	mux.HandleFunc("GET /{$}", app.RequireUser(func(w http.ResponseWriter, r *http.Request) {
-		app.Render(w, r, "home.html", nil)
-	}))
+	mux := buildMux(app)
 
 	log.Printf("Scruples listening on %s", addr)
 	log.Fatal(http.ListenAndServe(addr, mux))
