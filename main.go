@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 
+	"scruples/internal/api"
 	"scruples/internal/auth"
 	"scruples/internal/cards"
 	"scruples/internal/db"
@@ -12,11 +13,14 @@ import (
 	"scruples/internal/web"
 )
 
-func buildMux(app *web.App) *http.ServeMux {
+func buildMux(app *web.App, apiKey string) *http.ServeMux {
 	mux := http.NewServeMux()
 	auth.Routes(mux, app)
 	cards.Routes(mux, app)
 	game.Routes(mux, app)
+	if apiKey != "" {
+		api.Routes(mux, app.DB, apiKey)
+	}
 
 	mux.HandleFunc("GET /{$}", app.RequireUser(func(w http.ResponseWriter, r *http.Request) {
 		app.Render(w, r, "home.html", nil)
@@ -46,7 +50,7 @@ func main() {
 	}
 
 	app := web.NewApp(database)
-	mux := buildMux(app)
+	mux := buildMux(app, os.Getenv("SCRUPLES_API_KEY"))
 
 	log.Printf("Scruples listening on %s", addr)
 	log.Fatal(http.ListenAndServe(addr, mux))
