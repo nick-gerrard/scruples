@@ -20,6 +20,7 @@ type guessFixture struct {
 	d                       *sql.DB
 	alice, bob, carol, dave *web.User
 	roundID                 int64
+	gameID                  int64
 }
 
 func newGuessFixture(t *testing.T, guess bool) *guessFixture {
@@ -46,6 +47,7 @@ func newGuessFixture(t *testing.T, guess bool) *guessFixture {
 	if err != nil {
 		t.Fatalf("activeGame: %v", err)
 	}
+	f.gameID = g.ID
 	res, err := d.Exec(`INSERT INTO rounds (game_id, card_id, drawer_id) VALUES (?, ?, ?)`, g.ID, card, f.alice.ID)
 	if err != nil {
 		t.Fatalf("insert round: %v", err)
@@ -148,11 +150,12 @@ func TestDoGuessRejections(t *testing.T) {
 
 func TestGuessCandidatesKeepCardAuthor(t *testing.T) {
 	f := newGuessFixture(t, true)
-	// Bob's cards get archived after the draw: he must stay a candidate.
-	if _, err := f.d.Exec(`UPDATE cards SET archived_at = datetime('now') WHERE author_id = ?`, f.bob.ID); err != nil {
+	// Bob's cards get archived after the draw: he stays a candidate because his
+	// card was drawn. Dave's only card is archived and never drawn: he is out.
+	if _, err := f.d.Exec(`UPDATE cards SET archived_at = datetime('now') WHERE author_id IN (?, ?)`, f.bob.ID, f.dave.ID); err != nil {
 		t.Fatal(err)
 	}
-	cands, err := guessCandidates(f.d, true, f.alice.ID, f.bob.ID)
+	cands, err := guessCandidates(f.d, f.gameID, true, f.alice.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,8 +163,8 @@ func TestGuessCandidatesKeepCardAuthor(t *testing.T) {
 	for _, c := range cands {
 		names = append(names, c.Name)
 	}
-	if strings.Join(names, ",") != "bob,carol,dave" {
-		t.Fatalf("candidates = %v, want bob,carol,dave (name order)", names)
+	if strings.Join(names, ",") != "bob,carol" {
+		t.Fatalf("candidates = %v, want bob,carol (name order)", names)
 	}
 	if err := doGuess(f.d, f.alice, f.bob.ID); err != nil {
 		t.Fatalf("guess archived author: %v", err)
@@ -176,10 +179,7 @@ func TestGuessCandidatesKeepCardAuthor(t *testing.T) {
 	if len(s.Guesses) != 1 || !s.Guesses[0].Correct {
 		t.Fatalf("guesses = %+v, want one correct", s.Guesses)
 	}
-	// Someone who isn't the card author and has no active cards is still out.
-	if _, err := f.d.Exec(`UPDATE cards SET archived_at = datetime('now') WHERE author_id = ?`, f.dave.ID); err != nil {
-		t.Fatal(err)
-	}
+	// Someone who has no active cards and never had one drawn is still out.
 	if err := doGuess(f.d, f.carol, f.dave.ID); !errors.Is(err, errGuessRejected) {
 		t.Fatalf("err = %v, want rejection", err)
 	}

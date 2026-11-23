@@ -187,13 +187,14 @@ type guessCandidate struct {
 }
 
 // guessCandidates lists the distinct authors of the active deck the game draws
-// from, sorted by name, never including excludeID. The Claude bot appears only
-// when AI cards are in play. Users are loaded once, with avatar versions.
+// from, plus the authors of every card drawn in this game's rounds (including
+// the current one), sorted by name, never including excludeID. The Claude bot
+// appears from the deck only when AI cards are in play.
 //
-// cardAuthorID (the current round card's true author) is always included, even
-// if their cards were archived or AI was switched off after the draw, so a
-// correct guess stays possible; they are not marked or ordered differently.
-func guessCandidates(q querier, includeAI bool, excludeID, cardAuthorID int64) ([]guessCandidate, error) {
+// Drawn-card authors stay candidates even if their cards were archived or AI
+// was switched off after the draw, so a correct guess stays possible without
+// the current card's author being singled out.
+func guessCandidates(q querier, gameID int64, includeAI bool, excludeID int64) ([]guessCandidate, error) {
 	deck := "c.archived_at IS NULL"
 	if !includeAI {
 		deck += " AND c.source != 'ai'"
@@ -205,8 +206,9 @@ func guessCandidates(q querier, includeAI bool, excludeID, cardAuthorID int64) (
 	rows, err := q.Query(
 		`SELECT u.id, u.username, COALESCE(u.avatar_path, '')
 		 FROM users u
-		 WHERE u.id != ? AND ((`+userCond+`) OR u.id = ?)
-		 ORDER BY u.username COLLATE NOCASE, u.id`, excludeID, cardAuthorID)
+		 WHERE u.id != ? AND ((`+userCond+`) OR u.id IN (
+		   SELECT c.author_id FROM rounds r JOIN cards c ON c.id = r.card_id WHERE r.game_id = ?))
+		 ORDER BY u.username COLLATE NOCASE, u.id`, excludeID, gameID)
 	if err != nil {
 		return nil, err
 	}
@@ -258,7 +260,7 @@ func doGuess(db *sql.DB, u *web.User, guessedID int64) error {
 	if authorID == u.ID {
 		return fmt.Errorf("%w: you wrote this card", errGuessRejected)
 	}
-	cands, err := guessCandidates(tx, g.IncludeAI, u.ID, authorID)
+	cands, err := guessCandidates(tx, g.ID, g.IncludeAI, u.ID)
 	if err != nil {
 		return err
 	}

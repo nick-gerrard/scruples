@@ -510,10 +510,15 @@ func fillAuthorReveal(q querier, g *gameRow, rounds []*RoundSummaryView) error {
 	for _, s := range rounds {
 		byID[s.ID] = s
 	}
+	// A single round (buildRoundSummary) filters to it; otherwise load the game's.
+	roundCond, roundArgs := "", []any{g.ID}
+	if len(rounds) == 1 {
+		roundCond, roundArgs = " AND r.id = ?", append(roundArgs, rounds[0].ID)
+	}
 	arows, err := q.Query(
 		`SELECT r.id, c.author_id, u.username
 		 FROM rounds r JOIN cards c ON c.id = r.card_id JOIN users u ON u.id = c.author_id
-		 WHERE r.game_id = ? AND r.status = 'complete'`, g.ID)
+		 WHERE r.game_id = ? AND r.status = 'complete'`+roundCond, roundArgs...)
 	if err != nil {
 		return err
 	}
@@ -539,8 +544,8 @@ func fillAuthorReveal(q querier, g *gameRow, rounds []*RoundSummaryView) error {
 		 JOIN rounds r ON r.id = ag.round_id
 		 JOIN users gu ON gu.id = ag.user_id
 		 JOIN users au ON au.id = ag.guessed_author_id
-		 WHERE r.game_id = ? AND r.status = 'complete'
-		 ORDER BY ag.round_id, gu.username COLLATE NOCASE`, g.ID)
+		 WHERE r.game_id = ? AND r.status = 'complete'`+roundCond+`
+		 ORDER BY ag.round_id, gu.username COLLATE NOCASE`, roundArgs...)
 	if err != nil {
 		return err
 	}
@@ -1040,10 +1045,10 @@ func buildViewInner(db *sql.DB, me *web.User, errMsg string) (*GameView, error) 
 	if g.GuessAuthor {
 		gp := &GuessPanel{}
 		var authorID int64
-		if err := db.QueryRow(`SELECT author_id FROM cards WHERE id = ?`, rd.CardID).Scan(&authorID); err != nil {
-			return nil, err
-		}
-		if err := db.QueryRow(`SELECT COUNT(*) FROM author_guesses WHERE round_id = ?`, rd.ID).Scan(&gp.Guessed); err != nil {
+		if err := db.QueryRow(
+			`SELECT c.author_id, (SELECT COUNT(*) FROM author_guesses WHERE round_id = ?)
+			 FROM cards c WHERE c.id = ?`, rd.ID, rd.CardID,
+		).Scan(&authorID, &gp.Guessed); err != nil {
 			return nil, err
 		}
 		if v.Me.Eligible {
@@ -1056,7 +1061,7 @@ func buildViewInner(db *sql.DB, me *web.User, errMsg string) (*GameView, error) 
 			).Scan(&gp.MyGuessID); err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return nil, err
 			}
-			if gp.Candidates, err = guessCandidates(db, g.IncludeAI, me.ID, authorID); err != nil {
+			if gp.Candidates, err = guessCandidates(db, g.ID, g.IncludeAI, me.ID); err != nil {
 				return nil, err
 			}
 		}
