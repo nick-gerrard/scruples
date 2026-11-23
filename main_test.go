@@ -120,13 +120,14 @@ func TestStaticAssets(t *testing.T) {
 		path        string
 		wantStatus  int
 		wantType    string
-		wantCacheOK bool
+		wantCache   string
 	}{
-		{"/static/brand/logo.svg", http.StatusOK, "image/svg+xml", true},
-		{"/static/brand/favicon-32.png", http.StatusOK, "image/png", true},
-		{"/static/brand/site.webmanifest", http.StatusOK, "", true},
-		{"/static/brand/", http.StatusNotFound, "", false},
-		{"/static/brand/missing.svg", http.StatusNotFound, "", false},
+		{"/static/brand/logo.svg?v=1", http.StatusOK, "image/svg+xml", "max-age=31536000, immutable"},
+		{"/static/brand/logo.svg", http.StatusOK, "image/svg+xml", "max-age=86400"},
+		{"/static/brand/favicon-32.png", http.StatusOK, "image/png", "max-age=86400"},
+		{"/static/brand/site.webmanifest", http.StatusOK, "", "max-age=86400"},
+		{"/static/brand/", http.StatusNotFound, "", ""},
+		{"/static/brand/missing.svg", http.StatusNotFound, "", ""},
 	} {
 		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
 		rec := httptest.NewRecorder()
@@ -138,8 +139,8 @@ func TestStaticAssets(t *testing.T) {
 		if tc.wantType != "" && !strings.HasPrefix(rec.Header().Get("Content-Type"), tc.wantType) {
 			t.Errorf("GET %s content-type = %q, want %q", tc.path, rec.Header().Get("Content-Type"), tc.wantType)
 		}
-		if got := rec.Header().Get("Cache-Control"); tc.wantCacheOK && !strings.Contains(got, "max-age=31536000") {
-			t.Errorf("GET %s cache-control = %q, want long max-age", tc.path, got)
+		if got := rec.Header().Get("Cache-Control"); tc.wantCache != "" && !strings.Contains(got, tc.wantCache) {
+			t.Errorf("GET %s cache-control = %q, want %q", tc.path, got, tc.wantCache)
 		}
 	}
 }
