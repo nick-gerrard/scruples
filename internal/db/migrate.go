@@ -112,6 +112,15 @@ CREATE TABLE IF NOT EXISTS api_audit (
 );
 `,
 	},
+	{
+		Version: 4,
+		Name:    "discussion",
+		SQL: `
+ALTER TABLE games ADD COLUMN discussion_seconds INTEGER NOT NULL DEFAULT 60;
+ALTER TABLE rounds ADD COLUMN completed_at TEXT;
+ALTER TABLE rounds ADD COLUMN discussion_ends_at TEXT;
+`,
+	},
 }
 
 func appliedVersions(db *sql.DB) (map[int]bool, error) {

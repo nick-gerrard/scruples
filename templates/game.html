@@ -1,7 +1,111 @@
 {{define "title"}}Play{{end}}
 
 {{define "content"}}
-<div id="game-state" hx-get="/game/state" hx-trigger="every 2s" hx-swap="innerHTML">{{template "game-state" .}}</div>
+<div id="game-state" hx-get="/game/state" hx-trigger="every 2s, discussion-ended" hx-swap="innerHTML" hx-include="#game-state-v" hx-disinherit="hx-include">{{template "game-state" .}}</div>
+
+<div id="history-sheet" class="fixed inset-0 z-50 hidden" role="dialog" aria-modal="true" aria-label="Round history">
+  <div class="fixed inset-0 bg-slate-950/75 backdrop-blur-sm" onclick="closeHistorySheet()"></div>
+  <div class="fixed inset-x-0 bottom-0 mx-auto flex max-h-[85vh] max-w-2xl flex-col rounded-t-3xl border-x border-t border-slate-800 bg-slate-950 shadow-2xl">
+    <div class="flex justify-center pt-3 pb-1">
+      <div class="h-1.5 w-12 rounded-full bg-slate-700"></div>
+    </div>
+    <div class="flex items-center justify-between border-b border-slate-800 px-4 pb-3 pt-1">
+      <div class="text-base font-bold text-slate-100">Round history</div>
+      <button type="button" onclick="closeHistorySheet()" aria-label="Close round history" class="inline-flex h-11 w-11 items-center justify-center rounded-xl text-lg text-slate-400 active:bg-slate-800 active:text-slate-100">✕</button>
+    </div>
+    <div id="history-sheet-body" class="flex-1 overflow-y-auto px-4 pb-8 pt-4">
+      <div class="py-8 text-center text-sm text-slate-500">Loading…</div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var sheet = document.getElementById('history-sheet');
+  var body = document.getElementById('history-sheet-body');
+  var firedEndsAt = null;
+
+  window.openHistorySheet = function () {
+    if (!sheet) return;
+    if (body) body.innerHTML = '<div class="py-8 text-center text-sm text-slate-500">Loading…</div>';
+    sheet.classList.remove('hidden');
+    document.body.classList.add('overflow-hidden');
+  };
+
+  window.closeHistorySheet = function () {
+    if (!sheet) return;
+    sheet.classList.add('hidden');
+    document.body.classList.remove('overflow-hidden');
+  };
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && sheet && !sheet.classList.contains('hidden')) {
+      window.closeHistorySheet();
+    }
+  });
+
+  function formatTime(secs) {
+    var s = Math.max(0, Math.ceil(secs));
+    var m = Math.floor(s / 60);
+    var r = s % 60;
+    return m + ':' + (r < 10 ? '0' : '') + r;
+  }
+
+  function initDiscussionRings() {
+    var rings = document.querySelectorAll('[data-discussion-ring]');
+    for (var i = 0; i < rings.length; i++) {
+      (function (el) {
+        if (el.dataset.ringInit === '1') return;
+        el.dataset.ringInit = '1';
+
+        var endsAt = Number(el.dataset.endsAt || 0);
+        var total = Math.max(Number(el.dataset.total || 1), 1);
+        var serverNow = Number(el.dataset.serverNow || 0);
+        var offset = serverNow ? (Date.now() / 1000 - serverNow) : 0;
+        var fg = el.querySelector('.discussion-ring-fg');
+        var label = el.querySelector('.discussion-ring-time');
+        var circ = 2 * Math.PI * 36;
+        if (fg) fg.setAttribute('stroke-dasharray', circ.toFixed(3));
+
+        function tick() {
+          if (!el.isConnected) return;
+          var nowSec = Date.now() / 1000 - offset;
+          var rem = Math.max(0, endsAt - nowSec);
+          var ratio = Math.min(1, rem / total);
+          if (fg) {
+            fg.setAttribute('stroke-dashoffset', (circ * (1 - ratio)).toFixed(2));
+            fg.setAttribute('stroke', rem <= 10 ? '#f59e0b' : '#6366f1');
+          }
+          if (label) {
+            label.textContent = formatTime(rem);
+          }
+          if (rem <= 0) {
+            if (firedEndsAt !== endsAt) {
+              firedEndsAt = endsAt;
+              setTimeout(function () {
+                var gs = document.getElementById('game-state');
+                if (gs && window.htmx) {
+                  window.htmx.trigger(gs, 'discussion-ended');
+                }
+              }, 250);
+            }
+            return;
+          }
+          requestAnimationFrame(tick);
+        }
+        requestAnimationFrame(tick);
+      })(rings[i]);
+    }
+  }
+
+  initDiscussionRings();
+  document.body.addEventListener('htmx:afterSwap', function (e) {
+    if (e.detail && e.detail.target && e.detail.target.id === 'game-state') {
+      initDiscussionRings();
+    }
+  });
+})();
+</script>
 {{end}}
 
 {{define "start-form"}}
@@ -21,22 +125,210 @@
     <label for="point_goal" class="block text-sm font-medium text-slate-300">Point goal <span class="text-slate-500">(classic only)</span></label>
     <input type="number" id="point_goal" name="point_goal" value="5" min="1" max="100" class="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-slate-100 focus:border-indigo-500 focus:outline-none">
   </div>
-  <button type="submit" class="w-full rounded-xl bg-indigo-600 py-3 text-lg font-bold transition hover:bg-indigo-500 active:scale-[0.99]">Start game</button>
+  <div>
+    <div class="text-sm font-medium text-slate-300">Discussion timer</div>
+    <div class="mt-1.5 grid grid-cols-3 gap-2">
+      {{range .DiscussionOptions}}
+      <label class="cursor-pointer rounded-xl border border-slate-700 bg-slate-950/60 py-2.5 text-center text-sm font-semibold text-slate-300 transition has-[:checked]:border-indigo-500 has-[:checked]:bg-indigo-600/20 has-[:checked]:text-indigo-200">
+        <input type="radio" name="discussion_seconds" value="{{.Seconds}}" {{if eq .Seconds 60}}checked{{end}} class="sr-only">
+        {{.Label}}
+      </label>
+      {{end}}
+    </div>
+  </div>
+  <button type="submit" class="w-full rounded-xl bg-indigo-600 py-3.5 text-lg font-bold transition active:scale-[0.99]">Start game</button>
 </form>
 {{end}}
 
-{{define "vote-list"}}
-{{$r := .Round}}
-{{if $r.Revealed}}
-<div class="divide-y divide-slate-800 rounded-2xl border border-slate-800 bg-slate-900">
-  {{range $r.Revealed}}
-  <div class="flex items-center justify-between px-4 py-2.5 text-sm">
-    <span class="font-medium">{{.Name}}</span>
-    <span class="flex items-center gap-2">
-      <span class="font-bold uppercase {{if eq .Vote "yes"}}text-emerald-400{{else}}text-rose-400{{end}}">{{.Vote}}</span>
-      {{if $.Classic}}{{if .Correct}}<span class="text-emerald-400">✓</span>{{else}}<span class="text-rose-400">✗</span>{{end}}{{end}}
-    </span>
+{{define "vote-columns"}}
+<div class="grid grid-cols-2 gap-3">
+  <div class="rounded-2xl border border-emerald-500/30 bg-slate-900 p-3">
+    <div class="mb-2 flex items-center justify-between">
+      <span class="text-xs font-extrabold uppercase tracking-wider text-emerald-400">YES</span>
+      <span class="rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-bold text-emerald-300">{{.YesCount}}</span>
+    </div>
+    {{if .YesVotes}}
+    <div class="space-y-2">
+      {{range .YesVotes}}
+      <div class="flex items-center gap-2 rounded-xl px-2 py-1.5 {{if and $.Classic .Correct}}border border-emerald-500/40 bg-emerald-500/15{{else}}bg-slate-950/60{{end}}">
+        {{avatar .UserID .Name 28}}
+        <span class="min-w-0 flex-1 truncate text-sm font-medium {{if and $.Classic .Correct}}text-emerald-100{{else}}text-slate-200{{end}}">{{.Name}}</span>
+        {{if and $.Classic .Correct}}<span class="shrink-0 text-xs font-extrabold text-emerald-300">+1</span>{{end}}
+      </div>
+      {{end}}
+    </div>
+    {{else}}
+    <div class="py-3 text-center text-xs text-slate-500">Nobody</div>
+    {{end}}
   </div>
+
+  <div class="rounded-2xl border border-rose-500/30 bg-slate-900 p-3">
+    <div class="mb-2 flex items-center justify-between">
+      <span class="text-xs font-extrabold uppercase tracking-wider text-rose-400">NO</span>
+      <span class="rounded-full bg-rose-500/15 px-2 py-0.5 text-xs font-bold text-rose-300">{{.NoCount}}</span>
+    </div>
+    {{if .NoVotes}}
+    <div class="space-y-2">
+      {{range .NoVotes}}
+      <div class="flex items-center gap-2 rounded-xl px-2 py-1.5 {{if and $.Classic .Correct}}border border-emerald-500/40 bg-emerald-500/15{{else}}bg-slate-950/60{{end}}">
+        {{avatar .UserID .Name 28}}
+        <span class="min-w-0 flex-1 truncate text-sm font-medium {{if and $.Classic .Correct}}text-emerald-100{{else}}text-slate-200{{end}}">{{.Name}}</span>
+        {{if and $.Classic .Correct}}<span class="shrink-0 text-xs font-extrabold text-emerald-300">+1</span>{{end}}
+      </div>
+      {{end}}
+    </div>
+    {{else}}
+    <div class="py-3 text-center text-xs text-slate-500">Nobody</div>
+    {{end}}
+  </div>
+</div>
+{{end}}
+
+{{define "round-summary"}}
+<div class="space-y-4">
+  <div class="rounded-2xl border border-slate-800 bg-slate-900 p-4">
+    <div class="mb-3 flex items-center justify-between gap-2">
+      <span class="rounded-full bg-slate-800 px-2.5 py-0.5 text-xs font-bold text-slate-300">Round #{{.Number}}</span>
+      <span class="inline-flex min-w-0 items-center gap-1.5 text-xs text-slate-400">
+        {{avatar .DrawerID .DrawerName 20}}
+        <span class="truncate">{{.DrawerName}}</span>
+      </span>
+    </div>
+    <p class="italic text-slate-300">{{.Card.Circumstance}}</p>
+    <p class="mt-2.5 text-lg font-bold text-slate-100">{{.Card.Question}}</p>
+  </div>
+
+  {{if .Classic}}
+    {{if .Challenged}}
+    <div class="space-y-3 rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <span class="text-sm font-bold text-amber-300">Bluff called by {{.ChallengerName}}</span>
+        {{if .ChallengeOverturned}}
+        <span class="rounded-full bg-amber-500/25 px-2.5 py-0.5 text-xs font-extrabold uppercase tracking-wide text-amber-200">Overturned</span>
+        {{else}}
+        <span class="rounded-full bg-slate-800 px-2.5 py-0.5 text-xs font-bold uppercase tracking-wide text-slate-300">Answer stood</span>
+        {{end}}
+      </div>
+      <div class="grid grid-cols-2 gap-3 text-center">
+        <div class="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+          <div class="text-xs text-slate-400">{{.DrawerName}} claimed</div>
+          <div class="mt-1 text-2xl font-extrabold uppercase {{if eq .DrawerAnswer "yes"}}text-emerald-400{{else}}text-rose-400{{end}}">{{.DrawerAnswer}}</div>
+        </div>
+        <div class="rounded-xl border border-indigo-500/40 bg-indigo-600/15 p-3">
+          <div class="text-xs text-indigo-300">Final answer</div>
+          <div class="mt-1 text-2xl font-extrabold uppercase {{if eq .FinalAnswer "yes"}}text-emerald-400{{else}}text-rose-400{{end}}">{{.FinalAnswer}}</div>
+        </div>
+      </div>
+      {{if or .ChallengeFlip .ChallengeAgree}}
+      <div class="text-center text-xs text-amber-200/80">Challenge vote: {{.ChallengeFlip}} overturned · {{.ChallengeAgree}} stood</div>
+      {{end}}
+    </div>
+    {{else}}
+    <div class="grid grid-cols-2 gap-3 text-center">
+      <div class="rounded-2xl border border-slate-800 bg-slate-900 p-4">
+        <div class="text-xs text-slate-400">{{.DrawerName}} answered</div>
+        <div class="mt-1 text-3xl font-extrabold uppercase {{if eq .DrawerAnswer "yes"}}text-emerald-400{{else}}text-rose-400{{end}}">{{.DrawerAnswer}}</div>
+      </div>
+      <div class="rounded-2xl border border-indigo-500/40 bg-indigo-600/10 p-4">
+        <div class="text-xs text-indigo-300">Final answer</div>
+        <div class="mt-1 text-3xl font-extrabold uppercase {{if eq .FinalAnswer "yes"}}text-emerald-400{{else}}text-rose-400{{end}}">{{.FinalAnswer}}</div>
+      </div>
+    </div>
+    {{end}}
+  {{else}}
+  <div class="grid grid-cols-2 gap-3 text-center">
+    <div class="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 p-4">
+      <div class="text-3xl font-extrabold text-emerald-400">{{.YesCount}}</div>
+      <div class="text-xs font-bold uppercase tracking-wide text-emerald-300">yes</div>
+    </div>
+    <div class="rounded-2xl border border-rose-500/40 bg-rose-500/10 p-4">
+      <div class="text-3xl font-extrabold text-rose-400">{{.NoCount}}</div>
+      <div class="text-xs font-bold uppercase tracking-wide text-rose-300">no</div>
+    </div>
+  </div>
+  {{end}}
+
+  {{template "vote-columns" .}}
+</div>
+{{end}}
+
+{{define "history-sheet-body"}}
+{{if not .Rounds}}
+<div class="py-10 text-center text-sm text-slate-400">No completed rounds yet.</div>
+{{else}}
+<div class="space-y-4">
+  <div class="grid grid-cols-2 gap-2 rounded-2xl border border-slate-800 bg-slate-900 p-1">
+    <button type="button"
+            hx-get="/game/rounds?round={{.Selected.ID}}"
+            hx-target="#history-sheet-body"
+            hx-swap="innerHTML"
+            class="min-h-[44px] rounded-xl text-sm font-bold transition {{if eq .Tab "detail"}}bg-indigo-600 text-white{{else}}text-slate-400{{end}}">
+      Round #{{.Selected.Number}}
+    </button>
+    <button type="button"
+            hx-get="/game/rounds?tab=list&round={{.Selected.ID}}"
+            hx-target="#history-sheet-body"
+            hx-swap="innerHTML"
+            class="min-h-[44px] rounded-xl text-sm font-bold transition {{if eq .Tab "list"}}bg-indigo-600 text-white{{else}}text-slate-400{{end}}">
+      Rounds ({{len .Rounds}})
+    </button>
+  </div>
+
+  {{if eq .Tab "list"}}
+  <div class="space-y-2.5">
+    {{range .RoundsDesc}}
+    <button type="button"
+            hx-get="/game/rounds?round={{.ID}}"
+            hx-target="#history-sheet-body"
+            hx-swap="innerHTML"
+            class="w-full rounded-2xl border p-4 text-left transition active:scale-[0.99] {{if eq .ID $.Selected.ID}}border-indigo-500/60 bg-indigo-600/10{{else}}border-slate-800 bg-slate-900{{end}}">
+      <div class="flex items-center justify-between gap-2">
+        <div class="flex min-w-0 items-center gap-2">
+          <span class="rounded-full bg-slate-800 px-2 py-0.5 text-xs font-bold text-slate-300">#{{.Number}}</span>
+          {{avatar .DrawerID .DrawerName 22}}
+          <span class="truncate text-xs font-semibold text-slate-300">{{.DrawerName}}</span>
+        </div>
+        <div class="flex shrink-0 items-center gap-1.5">
+          {{if .Challenged}}
+          <span class="rounded-full bg-amber-500/20 px-2 py-0.5 text-[11px] font-bold text-amber-300">{{if .ChallengeOverturned}}Flipped{{else}}Challenged{{end}}</span>
+          {{end}}
+          {{if .Classic}}
+          <span class="rounded-full px-2 py-0.5 text-xs font-extrabold uppercase {{if eq .FinalAnswer "yes"}}bg-emerald-500/20 text-emerald-300{{else}}bg-rose-500/20 text-rose-300{{end}}">{{.FinalAnswer}}</span>
+          {{else}}
+          <span class="text-xs font-bold"><span class="text-emerald-400">{{.YesCount}}Y</span> · <span class="text-rose-400">{{.NoCount}}N</span></span>
+          {{end}}
+        </div>
+      </div>
+      <div class="mt-2 line-clamp-2 text-sm font-semibold text-slate-100">{{.Card.Question}}</div>
+    </button>
+    {{end}}
+  </div>
+  {{else}}
+  {{template "round-summary" .Selected}}
+
+  {{if gt (len .Rounds) 1}}
+  <div class="grid grid-cols-2 gap-3 pt-2">
+    {{if .PrevRoundID}}
+    <button type="button"
+            hx-get="/game/rounds?round={{.PrevRoundID}}"
+            hx-target="#history-sheet-body"
+            hx-swap="innerHTML"
+            class="min-h-[44px] rounded-xl border border-slate-700 bg-slate-900 px-3 py-3 text-sm font-bold text-slate-200 active:scale-[0.99]">← Round #{{.PrevRoundNum}}</button>
+    {{else}}
+    <div class="flex min-h-[44px] items-center justify-center rounded-xl border border-slate-800/60 px-3 py-3 text-sm text-slate-600">First round</div>
+    {{end}}
+
+    {{if .NextRoundID}}
+    <button type="button"
+            hx-get="/game/rounds?round={{.NextRoundID}}"
+            hx-target="#history-sheet-body"
+            hx-swap="innerHTML"
+            class="min-h-[44px] rounded-xl border border-slate-700 bg-slate-900 px-3 py-3 text-sm font-bold text-slate-200 active:scale-[0.99]">Round #{{.NextRoundNum}} →</button>
+    {{else}}
+    <div class="flex min-h-[44px] items-center justify-center rounded-xl border border-slate-800/60 px-3 py-3 text-sm text-slate-600">Latest round</div>
+    {{end}}
+  </div>
+  {{end}}
   {{end}}
 </div>
 {{end}}
@@ -44,6 +336,7 @@
 
 {{define "game-state"}}
 {{$d := .Data}}
+<input type="hidden" id="game-state-v" name="v" value="{{$d.StateVersion}}">
 {{if $d.Error}}
 <div class="mb-4 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">{{$d.Error}}</div>
 {{end}}
@@ -67,11 +360,24 @@
     <div class="mt-1 text-sm text-slate-400">{{if $d.Classic}}Ended early — no winner this time.{{else}}Thanks for playing.{{end}}</div>
     {{end}}
   </div>
+  {{if gt $d.CompletedRounds 0}}
+  <button type="button"
+          onclick="openHistorySheet()"
+          hx-get="/game/rounds"
+          hx-target="#history-sheet-body"
+          hx-swap="innerHTML"
+          class="w-full rounded-xl border border-slate-700 bg-slate-900 py-3 text-sm font-bold text-slate-200 active:scale-[0.99]">
+    View all {{$d.CompletedRounds}} round{{if ne $d.CompletedRounds 1}}s{{end}}
+  </button>
+  {{end}}
   {{if $d.Players}}
   <div class="divide-y divide-slate-800 rounded-2xl border border-slate-800 bg-slate-900">
     {{range $d.Players}}
     <div class="flex items-center justify-between px-4 py-2.5 text-sm">
-      <span class="font-semibold">{{if .IsWinner}}👑 {{end}}{{.Name}}{{if .IsMe}} <span class="text-xs font-normal text-indigo-400">(you)</span>{{end}}</span>
+      <span class="flex items-center gap-2 font-semibold">
+        {{avatar .ID .Name 24}}
+        <span>{{if .IsWinner}}👑 {{end}}{{.Name}}{{if .IsMe}} <span class="text-xs font-normal text-indigo-400">(you)</span>{{end}}</span>
+      </span>
       {{if $d.Classic}}<span class="text-slate-400">{{.Points}} pts</span>{{end}}
     </div>
     {{end}}
@@ -81,26 +387,79 @@
 </div>
 {{else}}
 <div class="space-y-5">
-  <div class="flex flex-wrap items-center gap-2">
-    <span class="rounded-full bg-indigo-600/20 px-3 py-1 text-xs font-bold uppercase tracking-wide text-indigo-300">{{if $d.Classic}}Classic{{else}}Free play{{end}}</span>
-    {{if $d.Classic}}<span class="text-xs text-slate-400">first to {{$d.PointGoal}} points</span>{{end}}
+  <div class="flex flex-wrap items-center justify-between gap-2">
+    <div class="flex flex-wrap items-center gap-2">
+      <span class="rounded-full bg-indigo-600/20 px-3 py-1 text-xs font-bold uppercase tracking-wide text-indigo-300">{{if $d.Classic}}Classic{{else}}Free play{{end}}</span>
+      {{if $d.Classic}}<span class="text-xs text-slate-400">first to {{$d.PointGoal}}</span>{{end}}
+    </div>
+    {{if and (gt $d.CompletedRounds 0) (not $d.Discussion)}}
+    <button type="button"
+            onclick="openHistorySheet()"
+            hx-get="/game/rounds"
+            hx-target="#history-sheet-body"
+            hx-swap="innerHTML"
+            class="inline-flex min-h-[36px] items-center gap-1.5 rounded-full border border-indigo-500/40 bg-indigo-600/15 px-3.5 py-1.5 text-xs font-bold text-indigo-200 active:scale-[0.98]">
+      <span>Last round</span>
+      {{if gt $d.CompletedRounds 1}}<span class="rounded-full bg-indigo-500/25 px-1.5 py-0.5 text-[11px]">{{$d.CompletedRounds}}</span>{{end}}
+    </button>
+    {{else if and $d.Discussion (gt $d.CompletedRounds 1)}}
+    <button type="button"
+            onclick="openHistorySheet()"
+            hx-get="/game/rounds?tab=list"
+            hx-target="#history-sheet-body"
+            hx-swap="innerHTML"
+            class="inline-flex min-h-[36px] items-center gap-1.5 rounded-full border border-slate-700 bg-slate-900 px-3.5 py-1.5 text-xs font-bold text-slate-200 active:scale-[0.98]">
+      Rounds ({{$d.CompletedRounds}})
+    </button>
+    {{end}}
   </div>
 
   <div class="flex flex-wrap gap-2">
     {{range $d.Players}}
-    <span class="inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm {{if .IsMe}}border-indigo-500/60 bg-indigo-600/15 text-indigo-200{{else}}border-slate-800 bg-slate-900 text-slate-300{{end}}{{if .IsNext}} ring-2 ring-violet-500/50{{end}}">
+    <span class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-sm {{if .IsMe}}border-indigo-500/60 bg-indigo-600/15 text-indigo-200{{else}}border-slate-800 bg-slate-900 text-slate-300{{end}}{{if .IsNext}} ring-2 ring-violet-500/50{{end}}">
+      {{avatar .ID .Name 20}}
       <span class="font-semibold">{{.Name}}</span>{{if $d.Classic}}<span class="{{if .IsMe}}text-indigo-300{{else}}text-slate-500{{end}}">· {{.Points}}</span>{{end}}
     </span>
     {{end}}
   </div>
 
   {{if not $d.Me.Joined}}
-  <button hx-post="/game/join" hx-target="#game-state" hx-swap="innerHTML" class="w-full rounded-xl bg-indigo-600 py-4 text-lg font-bold transition hover:bg-indigo-500 active:scale-[0.99]">Join the game</button>
+  <button hx-post="/game/join" hx-target="#game-state" hx-swap="innerHTML" class="w-full rounded-xl bg-indigo-600 py-4 text-lg font-bold transition active:scale-[0.99]">Join the game</button>
   {{end}}
 
-  {{if not $d.Round}}
+  {{if $d.Discussion}}
+    {{$disc := $d.Discussion}}
+    <div class="flex items-center gap-4 rounded-2xl border border-indigo-500/30 bg-slate-900 p-4"
+         data-discussion-ring
+         data-ends-at="{{$disc.DiscussionEndsUnix}}"
+         data-total="{{$disc.DiscussionTotalSecs}}"
+         data-server-now="{{$disc.ServerNowUnix}}">
+      <div class="relative flex h-20 w-20 shrink-0 items-center justify-center">
+        <svg class="h-20 w-20 -rotate-90" viewBox="0 0 88 88" aria-hidden="true">
+          <circle cx="44" cy="44" r="36" fill="none" stroke="rgb(30 41 59)" stroke-width="7"></circle>
+          <circle class="discussion-ring-fg" cx="44" cy="44" r="36" fill="none" stroke="#6366f1" stroke-width="7" stroke-linecap="round" stroke-dasharray="226.195" stroke-dashoffset="0"></circle>
+        </svg>
+        <span class="discussion-ring-time absolute text-lg font-extrabold tabular-nums text-slate-100">{{$disc.DiscussionRemText}}</span>
+      </div>
+      <div class="min-w-0 flex-1">
+        <div class="text-lg font-extrabold text-slate-100">Discussion</div>
+        <div class="mt-0.5 text-sm text-slate-400">
+          {{if $d.Classic}}Next up: <span class="font-semibold text-slate-200">{{$d.NextDrawerName}}</span>{{else}}Talk it out — next card unlocks at 0:00{{end}}
+        </div>
+      </div>
+    </div>
+
+    {{template "round-summary" $disc}}
+
+    {{if $d.Me.IsHost}}
+    <div class="grid grid-cols-2 gap-3">
+      <button type="button" hx-post="/game/discussion/skip" hx-target="#game-state" hx-swap="innerHTML" class="min-h-[48px] rounded-xl bg-indigo-600 py-3 text-base font-bold text-white transition active:scale-[0.99]">Skip</button>
+      <button type="button" hx-post="/game/discussion/extend" hx-target="#game-state" hx-swap="innerHTML" class="min-h-[48px] rounded-xl border border-slate-700 bg-slate-800 py-3 text-base font-bold text-slate-100 transition active:scale-[0.99]">+30s</button>
+    </div>
+    {{end}}
+  {{else if not $d.Round}}
     {{if $d.Me.CanDraw}}
-    <button hx-post="/game/draw" hx-target="#game-state" hx-swap="innerHTML" class="w-full rounded-xl bg-indigo-600 py-4 text-lg font-bold transition hover:bg-indigo-500 active:scale-[0.99]">🃏 Draw a card</button>
+    <button hx-post="/game/draw" hx-target="#game-state" hx-swap="innerHTML" class="w-full rounded-xl bg-indigo-600 py-4 text-lg font-bold transition active:scale-[0.99]">🃏 Draw a card</button>
     {{else}}
     <div class="rounded-2xl border border-slate-800 bg-slate-900 p-5 text-center text-slate-400">
       {{if $d.Classic}}Waiting for <span class="font-semibold text-slate-200">{{$d.NextDrawerName}}</span> to draw…{{else}}Waiting for someone to draw…{{end}}
@@ -111,7 +470,10 @@
     <div class="rounded-2xl border border-slate-800 bg-slate-900 p-5">
       <p class="italic text-slate-300">{{$r.Card.Circumstance}}</p>
       <p class="mt-3 text-lg font-bold">{{$r.Card.Question}}</p>
-      <p class="mt-4 text-xs text-slate-500">drawn by {{$r.DrawerName}}</p>
+      <div class="mt-4 flex items-center gap-1.5 text-xs text-slate-500">
+        {{avatar $r.DrawerID $r.DrawerName 18}}
+        <span>drawn by {{$r.DrawerName}}</span>
+      </div>
     </div>
 
     {{if eq $r.Status "voting"}}
@@ -121,8 +483,8 @@
         {{else}}
         <div class="text-center font-semibold">What would you <span class="text-indigo-300">ACTUALLY</span> do?</div>
         <div class="grid grid-cols-2 gap-3">
-          <button hx-post="/game/answer" hx-vals='{"answer":"yes"}' hx-target="#game-state" hx-swap="innerHTML" class="rounded-xl bg-emerald-600 py-4 text-xl font-extrabold transition hover:bg-emerald-500 active:scale-[0.99]">YES</button>
-          <button hx-post="/game/answer" hx-vals='{"answer":"no"}' hx-target="#game-state" hx-swap="innerHTML" class="rounded-xl bg-rose-600 py-4 text-xl font-extrabold transition hover:bg-rose-500 active:scale-[0.99]">NO</button>
+          <button hx-post="/game/answer" hx-vals='{"answer":"yes"}' hx-target="#game-state" hx-swap="innerHTML" class="rounded-xl bg-emerald-600 py-4 text-xl font-extrabold transition active:scale-[0.99]">YES</button>
+          <button hx-post="/game/answer" hx-vals='{"answer":"no"}' hx-target="#game-state" hx-swap="innerHTML" class="rounded-xl bg-rose-600 py-4 text-xl font-extrabold transition active:scale-[0.99]">NO</button>
         </div>
         {{end}}
       {{else if $d.Me.Eligible}}
@@ -131,8 +493,8 @@
         {{else}}
         <div class="text-center font-semibold">{{if $d.Classic}}Would <span class="text-indigo-300">{{$r.DrawerName}}</span> do it?{{else}}Would <span class="text-indigo-300">YOU</span> do it?{{end}}</div>
         <div class="grid grid-cols-2 gap-3">
-          <button hx-post="/game/vote" hx-vals='{"vote":"yes"}' hx-target="#game-state" hx-swap="innerHTML" class="rounded-xl bg-emerald-600 py-4 text-xl font-extrabold transition hover:bg-emerald-500 active:scale-[0.99]">YES</button>
-          <button hx-post="/game/vote" hx-vals='{"vote":"no"}' hx-target="#game-state" hx-swap="innerHTML" class="rounded-xl bg-rose-600 py-4 text-xl font-extrabold transition hover:bg-rose-500 active:scale-[0.99]">NO</button>
+          <button hx-post="/game/vote" hx-vals='{"vote":"yes"}' hx-target="#game-state" hx-swap="innerHTML" class="rounded-xl bg-emerald-600 py-4 text-xl font-extrabold transition active:scale-[0.99]">YES</button>
+          <button hx-post="/game/vote" hx-vals='{"vote":"no"}' hx-target="#game-state" hx-swap="innerHTML" class="rounded-xl bg-rose-600 py-4 text-xl font-extrabold transition active:scale-[0.99]">NO</button>
         </div>
         {{end}}
       {{else if $d.Me.Joined}}
@@ -147,12 +509,12 @@
         <div class="text-sm text-indigo-300">{{$r.DrawerName}} says</div>
         <div class="mt-1 text-4xl font-extrabold uppercase {{if eq $r.DrawerAnswer "yes"}}text-emerald-400{{else}}text-rose-400{{end}}">{{$r.DrawerAnswer}}</div>
       </div>
-      {{template "vote-list" $d}}
+      {{template "vote-columns" $r}}
       {{if $d.Me.CanChallenge}}
-      <button hx-post="/game/challenge" hx-confirm="Call the bluff — would {{$r.DrawerName}} really do that?" hx-target="#game-state" hx-swap="innerHTML" class="w-full rounded-xl bg-amber-600 py-3 text-lg font-bold transition hover:bg-amber-500 active:scale-[0.99]">Challenge!</button>
+      <button hx-post="/game/challenge" hx-confirm="Call the bluff — would {{$r.DrawerName}} really do that?" hx-target="#game-state" hx-swap="innerHTML" class="w-full rounded-xl bg-amber-600 py-3.5 text-lg font-bold transition active:scale-[0.99]">Challenge!</button>
       {{end}}
       {{if $d.Me.Joined}}
-      <button hx-post="/game/next" hx-target="#game-state" hx-swap="innerHTML" class="w-full rounded-xl bg-indigo-600 py-3 text-lg font-bold transition hover:bg-indigo-500 active:scale-[0.99]">Accept · next round</button>
+      <button hx-post="/game/next" hx-target="#game-state" hx-swap="innerHTML" class="w-full rounded-xl bg-indigo-600 py-3.5 text-lg font-bold transition active:scale-[0.99]">Accept · next round</button>
       {{end}}
       {{else}}
       <div class="grid grid-cols-2 gap-3 text-center">
@@ -165,9 +527,9 @@
           <div class="text-xs font-bold uppercase tracking-wide text-rose-300">no</div>
         </div>
       </div>
-      {{template "vote-list" $d}}
+      {{template "vote-columns" $r}}
       {{if $d.Me.Joined}}
-      <button hx-post="/game/next" hx-target="#game-state" hx-swap="innerHTML" class="w-full rounded-xl bg-indigo-600 py-3 text-lg font-bold transition hover:bg-indigo-500 active:scale-[0.99]">Next card</button>
+      <button hx-post="/game/next" hx-target="#game-state" hx-swap="innerHTML" class="w-full rounded-xl bg-indigo-600 py-3.5 text-lg font-bold transition active:scale-[0.99]">Next card</button>
       {{end}}
       {{end}}
     {{end}}
@@ -175,14 +537,14 @@
     {{if eq $r.Status "challenge"}}
       <div class="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 text-center font-semibold text-amber-300">{{$r.ChallengerName}} calls bluff — would {{$r.DrawerName}} <span class="uppercase">really</span> do it?</div>
       <div class="text-center text-sm text-slate-400">{{$r.DrawerName}} claimed <span class="font-bold uppercase {{if eq $r.DrawerAnswer "yes"}}text-emerald-400{{else}}text-rose-400{{end}}">{{$r.DrawerAnswer}}</span></div>
-      {{template "vote-list" $d}}
+      {{template "vote-columns" $r}}
       {{if and $d.Me.Eligible (not $d.Me.IsDrawer)}}
         {{if $d.Me.ChallengeVote}}
         <div class="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 p-4 text-center font-semibold text-emerald-300">Re-vote cast ✓</div>
         {{else}}
         <div class="grid grid-cols-2 gap-3">
-          <button hx-post="/game/challenge/vote" hx-vals='{"vote":"yes"}' hx-target="#game-state" hx-swap="innerHTML" class="rounded-xl bg-emerald-600 py-4 text-xl font-extrabold transition hover:bg-emerald-500 active:scale-[0.99]">YES</button>
-          <button hx-post="/game/challenge/vote" hx-vals='{"vote":"no"}' hx-target="#game-state" hx-swap="innerHTML" class="rounded-xl bg-rose-600 py-4 text-xl font-extrabold transition hover:bg-rose-500 active:scale-[0.99]">NO</button>
+          <button hx-post="/game/challenge/vote" hx-vals='{"vote":"yes"}' hx-target="#game-state" hx-swap="innerHTML" class="rounded-xl bg-emerald-600 py-4 text-xl font-extrabold transition active:scale-[0.99]">YES</button>
+          <button hx-post="/game/challenge/vote" hx-vals='{"vote":"no"}' hx-target="#game-state" hx-swap="innerHTML" class="rounded-xl bg-rose-600 py-4 text-xl font-extrabold transition active:scale-[0.99]">NO</button>
         </div>
         {{end}}
       {{end}}
@@ -190,9 +552,29 @@
     {{end}}
   {{end}}
 
-  {{if $d.Me.CanEnd}}
-  <div class="pt-2 text-center">
-    <button hx-post="/game/end" hx-confirm="End this game for everyone?" hx-target="#game-state" hx-swap="innerHTML" class="text-xs text-slate-500 underline hover:text-rose-400">End game</button>
+  {{if $d.Me.IsHost}}
+  <div class="space-y-3 pt-2">
+    <details class="rounded-2xl border border-slate-800 bg-slate-900/70 p-3">
+      <summary class="flex cursor-pointer list-none items-center justify-between text-xs font-semibold text-slate-400">
+        <span>Discussion timer</span>
+        <span class="rounded-full bg-slate-800 px-2.5 py-0.5 text-slate-200">{{if eq $d.DiscussionSeconds 0}}Off{{else}}{{$d.DiscussionSeconds}}s{{end}}</span>
+      </summary>
+      <div class="mt-3 grid grid-cols-3 gap-2">
+        {{range $d.DiscussionOptions}}
+        <button type="button"
+                hx-post="/game/discussion/duration"
+                hx-vals='{"discussion_seconds":"{{.Seconds}}"}'
+                hx-target="#game-state"
+                hx-swap="innerHTML"
+                class="min-h-[40px] rounded-xl border py-2 text-xs font-bold transition active:scale-[0.98] {{if eq .Seconds $d.DiscussionSeconds}}border-indigo-500 bg-indigo-600/25 text-indigo-200{{else}}border-slate-700 bg-slate-950/60 text-slate-300{{end}}">
+          {{.Label}}
+        </button>
+        {{end}}
+      </div>
+    </details>
+    <div class="text-center">
+      <button hx-post="/game/end" hx-confirm="End this game for everyone?" hx-target="#game-state" hx-swap="innerHTML" class="py-2 text-xs text-slate-500 underline">End game</button>
+    </div>
   </div>
   {{end}}
 </div>

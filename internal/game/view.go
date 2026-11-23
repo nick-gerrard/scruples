@@ -1,9 +1,14 @@
 package game
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
+	"fmt"
+	"math"
 	"sort"
+	"time"
 
 	"scruples/internal/web"
 )
@@ -18,22 +23,25 @@ type querier interface {
 // ---- raw rows ----
 
 type gameRow struct {
-	ID        int64
-	Mode      string
-	PointGoal int
-	Status    string
-	CreatedBy int64
+	ID                int64
+	Mode              string
+	PointGoal         int
+	Status            string
+	CreatedBy         int64
+	DiscussionSeconds int
 }
 
 type roundRow struct {
-	ID           int64
-	CardID       int64
-	DrawerID     int64
-	DrawerAnswer string // "" until answered
-	Status       string
-	FinalAnswer  string // "" until finalized
-	ChallengerID int64  // 0 until challenged
-	CreatedAt    string
+	ID               int64
+	CardID           int64
+	DrawerID         int64
+	DrawerAnswer     string // "" until answered
+	Status           string
+	FinalAnswer      string // "" until finalized
+	ChallengerID     int64  // 0 until challenged
+	CreatedAt        string
+	CompletedAt      string // "" until complete
+	DiscussionEndsAt string // "" until complete
 }
 
 type playerRow struct {
@@ -48,7 +56,7 @@ type playerRow struct {
 func scanGame(row *sql.Row) (*gameRow, error) {
 	g := &gameRow{}
 	var goal sql.NullInt64
-	err := row.Scan(&g.ID, &g.Mode, &goal, &g.Status, &g.CreatedBy)
+	err := row.Scan(&g.ID, &g.Mode, &goal, &g.Status, &g.CreatedBy, &g.DiscussionSeconds)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -61,21 +69,24 @@ func scanGame(row *sql.Row) (*gameRow, error) {
 
 func activeGame(q querier) (*gameRow, error) {
 	return scanGame(q.QueryRow(
-		`SELECT id, mode, point_goal, status, created_by
+		`SELECT id, mode, point_goal, status, created_by, discussion_seconds
 		 FROM games WHERE status = 'active' ORDER BY id DESC LIMIT 1`))
 }
 
 func latestFinishedGame(q querier) (*gameRow, error) {
 	return scanGame(q.QueryRow(
-		`SELECT id, mode, point_goal, status, created_by
+		`SELECT id, mode, point_goal, status, created_by, discussion_seconds
 		 FROM games WHERE status = 'finished' ORDER BY id DESC LIMIT 1`))
 }
 
 func scanRound(row *sql.Row) (*roundRow, error) {
 	rd := &roundRow{}
-	var ans, fin sql.NullString
+	var ans, fin, comp, discEnd sql.NullString
 	var chal sql.NullInt64
-	err := row.Scan(&rd.ID, &rd.CardID, &rd.DrawerID, &ans, &rd.Status, &fin, &chal, &rd.CreatedAt)
+	err := row.Scan(
+		&rd.ID, &rd.CardID, &rd.DrawerID, &ans, &rd.Status, &fin, &chal,
+		&rd.CreatedAt, &comp, &discEnd,
+	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -85,18 +96,20 @@ func scanRound(row *sql.Row) (*roundRow, error) {
 	rd.DrawerAnswer = ans.String
 	rd.FinalAnswer = fin.String
 	rd.ChallengerID = chal.Int64
+	rd.CompletedAt = comp.String
+	rd.DiscussionEndsAt = discEnd.String
 	return rd, nil
 }
 
 func latestRound(q querier, gameID int64) (*roundRow, error) {
 	return scanRound(q.QueryRow(
-		`SELECT id, card_id, drawer_id, drawer_answer, status, final_answer, challenger_id, created_at
+		`SELECT id, card_id, drawer_id, drawer_answer, status, final_answer, challenger_id, created_at, completed_at, discussion_ends_at
 		 FROM rounds WHERE game_id = ? ORDER BY id DESC LIMIT 1`, gameID))
 }
 
 func roundByID(q querier, id int64) (*roundRow, error) {
 	return scanRound(q.QueryRow(
-		`SELECT id, card_id, drawer_id, drawer_answer, status, final_answer, challenger_id, created_at
+		`SELECT id, card_id, drawer_id, drawer_answer, status, final_answer, challenger_id, created_at, completed_at, discussion_ends_at
 		 FROM rounds WHERE id = ?`, id))
 }
 
@@ -212,6 +225,7 @@ type PlayerView struct {
 }
 
 type VoteView struct {
+	UserID  int64
 	Name    string
 	Vote    string
 	Correct bool
@@ -219,13 +233,17 @@ type VoteView struct {
 
 type RoundView struct {
 	ID                 int64
+	Classic            bool
 	Card               CardView
+	DrawerID           int64
 	DrawerName         string
 	Status             string
 	VotesIn            int
 	VotesTotal         int
 	WaitingOn          []string
 	Revealed           []VoteView
+	YesVotes           []VoteView
+	NoVotes            []VoteView
 	YesCount           int
 	NoCount            int
 	DrawerAnswer       string
@@ -236,9 +254,51 @@ type RoundView struct {
 	ChallengeWaitingOn []string
 }
 
+// RoundSummaryView represents a completed round, used for both the live
+// discussion screen (with timer fields populated) and the round history sheet.
+type RoundSummaryView struct {
+	ID                  int64
+	Number              int
+	Classic             bool
+	Card                CardView
+	DrawerID            int64
+	DrawerName          string
+	DrawerAnswer        string
+	FinalAnswer         string
+	YesVotes            []VoteView
+	NoVotes             []VoteView
+	YesCount            int
+	NoCount             int
+	Challenged          bool
+	ChallengerID        int64
+	ChallengerName      string
+	ChallengeOverturned bool
+	ChallengeAgree      int
+	ChallengeFlip       int
+	CompletedAt         string
+	DiscussionEndsAt    string
+	DiscussionEndsUnix  int64
+	DiscussionTotalSecs int
+	DiscussionRemText   string
+	ServerNowUnix       int64
+}
+
+type HistorySheetView struct {
+	Classic      bool
+	Rounds       []RoundSummaryView
+	RoundsDesc   []RoundSummaryView
+	Tab          string // "detail" or "list"
+	Selected     *RoundSummaryView
+	PrevRoundID  int64
+	PrevRoundNum int
+	NextRoundID  int64
+	NextRoundNum int
+}
+
 type MeView struct {
 	ID            int64
 	IsAdmin       bool
+	IsHost        bool
 	Joined        bool
 	Eligible      bool
 	IsDrawer      bool
@@ -251,26 +311,363 @@ type MeView struct {
 }
 
 type GameView struct {
-	NoGame         bool
-	GameOver       bool
-	Error          string
-	ID             int64
-	Mode           string
-	PointGoal      int
-	Status         string
-	Classic        bool
-	Me             MeView
-	Players        []PlayerView
-	Round          *RoundView
-	NextDrawerName string
-	Winners        []string
+	NoGame            bool
+	GameOver          bool
+	Error             string
+	ID                int64
+	Mode              string
+	PointGoal         int
+	Status            string
+	Classic           bool
+	DiscussionSeconds int
+	DiscussionOptions []TimerOption
+	Me                MeView
+	Players           []PlayerView
+	Round             *RoundView
+	Discussion        *RoundSummaryView
+	CompletedRounds   int
+	LatestCompletedID int64
+	NextDrawerName    string
+	Winners           []string
+	StateVersion      string
+}
+
+func formatCountdown(secs int) string {
+	if secs < 0 {
+		secs = 0
+	}
+	return fmt.Sprintf("%d:%02d", secs/60, secs%60)
+}
+
+// loadCompletedRounds returns every completed round of game g in chronological
+// order (Round 1, Round 2, ...) along with its card, votes, and challenge outcome.
+func loadCompletedRounds(q querier, g *gameRow) ([]RoundSummaryView, error) {
+	rows, err := q.Query(
+		`SELECT r.id, c.circumstance, c.question,
+		        r.drawer_id, du.username,
+		        r.drawer_answer, r.final_answer,
+		        r.challenger_id, cu.username,
+		        r.completed_at, r.discussion_ends_at
+		 FROM rounds r
+		 JOIN cards c ON c.id = r.card_id
+		 JOIN users du ON du.id = r.drawer_id
+		 LEFT JOIN users cu ON cu.id = r.challenger_id
+		 WHERE r.game_id = ? AND r.status = 'complete'
+		 ORDER BY r.id ASC`, g.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []RoundSummaryView
+	byID := map[int64]int{}
+	classic := g.Mode == "classic"
+	for rows.Next() {
+		var s RoundSummaryView
+		var drawerAns, finalAns, chalName, compAt, discEnd sql.NullString
+		var chalID sql.NullInt64
+		if err := rows.Scan(
+			&s.ID, &s.Card.Circumstance, &s.Card.Question,
+			&s.DrawerID, &s.DrawerName,
+			&drawerAns, &finalAns,
+			&chalID, &chalName,
+			&compAt, &discEnd,
+		); err != nil {
+			return nil, err
+		}
+		s.Number = len(out) + 1
+		s.Classic = classic
+		s.DrawerAnswer = drawerAns.String
+		s.FinalAnswer = finalAns.String
+		if chalID.Valid && chalID.Int64 != 0 {
+			s.Challenged = true
+			s.ChallengerID = chalID.Int64
+			s.ChallengerName = chalName.String
+			if s.DrawerAnswer != "" && s.FinalAnswer != "" && s.FinalAnswer != s.DrawerAnswer {
+				s.ChallengeOverturned = true
+			}
+		}
+		s.CompletedAt = compAt.String
+		s.DiscussionEndsAt = discEnd.String
+		byID[s.ID] = len(out)
+		out = append(out, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(out) == 0 {
+		return out, nil
+	}
+
+	vrows, err := q.Query(
+		`SELECT v.round_id, v.user_id, u.username, v.phase, v.vote
+		 FROM votes v
+		 JOIN rounds r ON r.id = v.round_id
+		 JOIN users u ON u.id = v.user_id
+		 LEFT JOIN game_players gp ON gp.game_id = r.game_id AND gp.user_id = v.user_id
+		 WHERE r.game_id = ? AND r.status = 'complete'
+		 ORDER BY r.id ASC, COALESCE(gp.turn_order, 999999) ASC, u.id ASC`, g.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer vrows.Close()
+
+	for vrows.Next() {
+		var roundID, userID int64
+		var name, phase, vote string
+		if err := vrows.Scan(&roundID, &userID, &name, &phase, &vote); err != nil {
+			return nil, err
+		}
+		idx, ok := byID[roundID]
+		if !ok {
+			continue
+		}
+		s := &out[idx]
+		if phase == "initial" {
+			cmp := s.FinalAnswer
+			if cmp == "" {
+				cmp = s.DrawerAnswer
+			}
+			vv := VoteView{
+				UserID:  userID,
+				Name:    name,
+				Vote:    vote,
+				Correct: s.Classic && vote == cmp,
+			}
+			if vote == "yes" {
+				s.YesVotes = append(s.YesVotes, vv)
+				s.YesCount++
+			} else {
+				s.NoVotes = append(s.NoVotes, vv)
+				s.NoCount++
+			}
+		} else if phase == "challenge" && s.Challenged {
+			if vote == s.DrawerAnswer {
+				s.ChallengeAgree++
+			} else {
+				s.ChallengeFlip++
+			}
+		}
+	}
+	return out, vrows.Err()
+}
+
+func buildHistorySheet(db *sql.DB, tab string, selectedRoundID int64) (*HistorySheetView, error) {
+	g, err := activeGame(db)
+	if err != nil {
+		return nil, err
+	}
+	if g == nil {
+		g, err = latestFinishedGame(db)
+		if err != nil || g == nil {
+			return &HistorySheetView{Tab: "detail"}, err
+		}
+	}
+	rounds, err := loadCompletedRounds(db, g)
+	if err != nil {
+		return nil, err
+	}
+	h := &HistorySheetView{
+		Classic: g.Mode == "classic",
+		Rounds:  rounds,
+		Tab:     "detail",
+	}
+	if tab == "list" {
+		h.Tab = "list"
+	}
+	for i := len(rounds) - 1; i >= 0; i-- {
+		h.RoundsDesc = append(h.RoundsDesc, rounds[i])
+	}
+	if len(rounds) == 0 {
+		return h, nil
+	}
+	selIdx := len(rounds) - 1
+	if selectedRoundID > 0 {
+		for i := range rounds {
+			if rounds[i].ID == selectedRoundID {
+				selIdx = i
+				break
+			}
+		}
+	}
+	h.Selected = &rounds[selIdx]
+	if selIdx > 0 {
+		h.PrevRoundID = rounds[selIdx-1].ID
+		h.PrevRoundNum = rounds[selIdx-1].Number
+	}
+	if selIdx+1 < len(rounds) {
+		h.NextRoundID = rounds[selIdx+1].ID
+		h.NextRoundNum = rounds[selIdx+1].Number
+	}
+	return h, nil
+}
+
+// buildRoundSummary loads a single completed round for the discussion screen.
+func buildRoundSummary(q querier, g *gameRow, rd *roundRow, roundNum int, now time.Time) (*RoundSummaryView, error) {
+	s := &RoundSummaryView{
+		ID:               rd.ID,
+		Number:           roundNum,
+		Classic:          g.Mode == "classic",
+		DrawerID:         rd.DrawerID,
+		DrawerAnswer:     rd.DrawerAnswer,
+		FinalAnswer:      rd.FinalAnswer,
+		CompletedAt:      rd.CompletedAt,
+		DiscussionEndsAt: rd.DiscussionEndsAt,
+	}
+	if err := q.QueryRow(`SELECT circumstance, question FROM cards WHERE id = ?`, rd.CardID).
+		Scan(&s.Card.Circumstance, &s.Card.Question); err != nil {
+		return nil, err
+	}
+	if err := q.QueryRow(`SELECT username FROM users WHERE id = ?`, rd.DrawerID).Scan(&s.DrawerName); err != nil {
+		return nil, err
+	}
+	if rd.ChallengerID != 0 {
+		s.Challenged = true
+		s.ChallengerID = rd.ChallengerID
+		if err := q.QueryRow(`SELECT username FROM users WHERE id = ?`, rd.ChallengerID).Scan(&s.ChallengerName); err != nil {
+			return nil, err
+		}
+		if s.DrawerAnswer != "" && s.FinalAnswer != "" && s.FinalAnswer != s.DrawerAnswer {
+			s.ChallengeOverturned = true
+		}
+	}
+
+	vrows, err := q.Query(
+		`SELECT v.user_id, u.username, v.phase, v.vote
+		 FROM votes v
+		 JOIN users u ON u.id = v.user_id
+		 LEFT JOIN game_players gp ON gp.game_id = ? AND gp.user_id = v.user_id
+		 WHERE v.round_id = ?
+		 ORDER BY COALESCE(gp.turn_order, 999999) ASC, u.id ASC`, g.ID, rd.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer vrows.Close()
+
+	cmp := s.FinalAnswer
+	if cmp == "" {
+		cmp = s.DrawerAnswer
+	}
+	for vrows.Next() {
+		var uid int64
+		var name, phase, vote string
+		if err := vrows.Scan(&uid, &name, &phase, &vote); err != nil {
+			return nil, err
+		}
+		if phase == "initial" {
+			vv := VoteView{
+				UserID:  uid,
+				Name:    name,
+				Vote:    vote,
+				Correct: s.Classic && vote == cmp,
+			}
+			if vote == "yes" {
+				s.YesVotes = append(s.YesVotes, vv)
+				s.YesCount++
+			} else {
+				s.NoVotes = append(s.NoVotes, vv)
+				s.NoCount++
+			}
+		} else if phase == "challenge" && s.Challenged {
+			if vote == s.DrawerAnswer {
+				s.ChallengeAgree++
+			} else {
+				s.ChallengeFlip++
+			}
+		}
+	}
+	if err := vrows.Err(); err != nil {
+		return nil, err
+	}
+
+	if endsAt, ok := parseTime(rd.DiscussionEndsAt); ok {
+		s.DiscussionEndsUnix = endsAt.Unix()
+		s.ServerNowUnix = now.UTC().Unix()
+		rem := int(math.Ceil(endsAt.Sub(now.UTC()).Seconds()))
+		if rem < 0 {
+			rem = 0
+		}
+		s.DiscussionRemText = formatCountdown(rem)
+		total := g.DiscussionSeconds
+		if compAt, ok := parseTime(rd.CompletedAt); ok && endsAt.After(compAt) {
+			total = int(math.Round(endsAt.Sub(compAt).Seconds()))
+		}
+		if total < 1 {
+			total = 1
+		}
+		s.DiscussionTotalSecs = total
+	}
+	return s, nil
+}
+
+// computeStateVersion hashes every piece of view state that affects the
+// #game-state fragment so GET /game/state can return 204 when unchanged.
+// Wall-clock display fields (ServerNowUnix, DiscussionRemText) are intentionally
+// excluded so ticking countdowns do not trigger re-renders.
+func computeStateVersion(v *GameView) string {
+	h := sha256.New()
+	fmt.Fprintf(h, "ng=%t;go=%t;id=%d;m=%s;pg=%d;st=%s;ds=%d;cr=%d;lc=%d;nd=%s|",
+		v.NoGame, v.GameOver, v.ID, v.Mode, v.PointGoal, v.Status,
+		v.DiscussionSeconds, v.CompletedRounds, v.LatestCompletedID, v.NextDrawerName)
+	fmt.Fprintf(h, "me=%d,%t,%t,%t,%t,%t,%s,%s,%t,%t,%t,%t|",
+		v.Me.ID, v.Me.IsAdmin, v.Me.IsHost, v.Me.Joined, v.Me.Eligible, v.Me.IsDrawer,
+		v.Me.InitialVote, v.Me.ChallengeVote, v.Me.AnswerSet,
+		v.Me.CanDraw, v.Me.CanChallenge, v.Me.CanEnd)
+	for _, p := range v.Players {
+		fmt.Fprintf(h, "p=%d,%s,%d,%t,%t,%t;", p.ID, p.Name, p.Points, p.IsNext, p.IsWinner, p.IsMe)
+	}
+	for _, w := range v.Winners {
+		fmt.Fprintf(h, "w=%s;", w)
+	}
+	if r := v.Round; r != nil {
+		fmt.Fprintf(h, "|r=%d,%s,%d,%s,%s,%s,%d/%d,%d/%d,%s,%d/%d",
+			r.ID, r.Status, r.DrawerID, r.DrawerName, r.DrawerAnswer, r.FinalAnswer,
+			r.VotesIn, r.VotesTotal, r.YesCount, r.NoCount,
+			r.ChallengerName, r.ChallengeIn, r.ChallengeTotal)
+		for _, wn := range r.WaitingOn {
+			fmt.Fprintf(h, ",wo=%s", wn)
+		}
+		for _, rv := range r.Revealed {
+			fmt.Fprintf(h, ",rv=%d:%s:%t", rv.UserID, rv.Vote, rv.Correct)
+		}
+		for _, cw := range r.ChallengeWaitingOn {
+			fmt.Fprintf(h, ",cw=%s", cw)
+		}
+	}
+	if d := v.Discussion; d != nil {
+		fmt.Fprintf(h, "|disc=%d,%d,%s,%s,%s,%d,%t,%s,%t,%d,%d",
+			d.ID, d.Number, d.DrawerAnswer, d.FinalAnswer,
+			d.DiscussionEndsAt, d.DiscussionTotalSecs,
+			d.Challenged, d.ChallengerName, d.ChallengeOverturned,
+			d.ChallengeAgree, d.ChallengeFlip)
+		for _, yv := range d.YesVotes {
+			fmt.Fprintf(h, ",y=%d:%s:%t", yv.UserID, yv.Name, yv.Correct)
+		}
+		for _, nv := range d.NoVotes {
+			fmt.Fprintf(h, ",n=%d:%s:%t", nv.UserID, nv.Name, nv.Correct)
+		}
+	}
+	sum := h.Sum(nil)
+	return hex.EncodeToString(sum[:8])
 }
 
 // buildView assembles everything the templates need. Hidden information
 // (votes, the drawer's answer) is only included once the round status
 // permits revealing it.
 func buildView(db *sql.DB, me *web.User, errMsg string) (*GameView, error) {
-	v := &GameView{Error: errMsg}
+	v, err := buildViewInner(db, me, errMsg)
+	if err != nil {
+		return nil, err
+	}
+	v.StateVersion = computeStateVersion(v)
+	return v, nil
+}
+
+func buildViewInner(db *sql.DB, me *web.User, errMsg string) (*GameView, error) {
+	v := &GameView{
+		Error:             errMsg,
+		DiscussionOptions: discussionOptions,
+	}
 	v.Me.ID = me.ID
 	v.Me.IsAdmin = me.IsAdmin
 
@@ -291,6 +688,14 @@ func buildView(db *sql.DB, me *web.User, errMsg string) (*GameView, error) {
 	}
 	v.ID, v.Mode, v.PointGoal, v.Status = g.ID, g.Mode, g.PointGoal, g.Status
 	v.Classic = g.Mode == "classic"
+	v.DiscussionSeconds = g.DiscussionSeconds
+
+	if err := db.QueryRow(
+		`SELECT COUNT(*), COALESCE(MAX(id), 0) FROM rounds WHERE game_id = ? AND status = 'complete'`,
+		g.ID,
+	).Scan(&v.CompletedRounds, &v.LatestCompletedID); err != nil {
+		return nil, err
+	}
 
 	players, err := loadPlayers(db, g.ID)
 	if err != nil {
@@ -320,7 +725,8 @@ func buildView(db *sql.DB, me *web.User, errMsg string) (*GameView, error) {
 		return v, nil
 	}
 
-	v.Me.CanEnd = me.ID == g.CreatedBy || me.IsAdmin
+	v.Me.IsHost = isHost(g, me)
+	v.Me.CanEnd = v.Me.IsHost
 
 	rd, err := latestRound(db, g.ID)
 	if err != nil {
@@ -348,11 +754,21 @@ func buildView(db *sql.DB, me *web.User, errMsg string) (*GameView, error) {
 	v.NextDrawerName = names[nextID]
 
 	if !open {
+		now := nowFunc().UTC()
+		if discussionOpen(rd, now) {
+			disc, err := buildRoundSummary(db, g, rd, v.CompletedRounds, now)
+			if err != nil {
+				return nil, err
+			}
+			v.Discussion = disc
+			v.Me.CanDraw = false
+			return v, nil
+		}
 		v.Me.CanDraw = v.Me.Joined && (!v.Classic || me.ID == nextID)
 		return v, nil
 	}
 
-	rv := &RoundView{ID: rd.ID, Status: rd.Status, DrawerName: names[rd.DrawerID]}
+	rv := &RoundView{ID: rd.ID, Classic: v.Classic, Status: rd.Status, DrawerID: rd.DrawerID, DrawerName: names[rd.DrawerID]}
 	if err := db.QueryRow(`SELECT circumstance, question FROM cards WHERE id = ?`, rd.CardID).
 		Scan(&rv.Card.Circumstance, &rv.Card.Question); err != nil {
 		return nil, err
@@ -418,13 +834,18 @@ func buildView(db *sql.DB, me *web.User, errMsg string) (*GameView, error) {
 			if !ok {
 				continue
 			}
-			rv.Revealed = append(rv.Revealed, VoteView{
-				Name: p.Name, Vote: vote,
+			vv := VoteView{
+				UserID:  p.ID,
+				Name:    p.Name,
+				Vote:    vote,
 				Correct: v.Classic && vote == cmp,
-			})
+			}
+			rv.Revealed = append(rv.Revealed, vv)
 			if vote == "yes" {
+				rv.YesVotes = append(rv.YesVotes, vv)
 				rv.YesCount++
 			} else {
+				rv.NoVotes = append(rv.NoVotes, vv)
 				rv.NoCount++
 			}
 		}
