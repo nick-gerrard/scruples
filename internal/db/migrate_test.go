@@ -113,4 +113,16 @@ func TestMigrationsPreMigrationDB(t *testing.T) {
 	); err == nil {
 		t.Fatal("expected CHECK constraint error for invalid source, got nil")
 	}
+
+	// Verify Claude bot user was seeded by migration 3.
+	var pwHash string
+	var isAdmin, isBot int
+	if err := d.QueryRow(
+		`SELECT password_hash, is_admin, is_bot FROM users WHERE username = 'Claude'`,
+	).Scan(&pwHash, &isAdmin, &isBot); err != nil {
+		t.Fatalf("Claude bot user missing: %v", err)
+	}
+	if pwHash != "!" || isAdmin != 0 || isBot != 1 {
+		t.Fatalf("Claude user = (hash=%q, admin=%d, bot=%d), want ('!', 0, 1)", pwHash, isAdmin, isBot)
+	}
 }

@@ -82,6 +82,24 @@ ALTER TABLE cards ADD COLUMN archived_at TEXT;
 CREATE INDEX IF NOT EXISTS cards_active ON cards(archived_at);
 `,
 	},
+	{
+		Version: 3,
+		Name:    "api_claude_audit",
+		SQL: `
+ALTER TABLE users ADD COLUMN is_bot INTEGER NOT NULL DEFAULT 0;
+INSERT OR IGNORE INTO users (username, password_hash, is_admin, is_bot) VALUES ('Claude', '!', 0, 1);
+CREATE TABLE IF NOT EXISTS api_audit (
+  id INTEGER PRIMARY KEY,
+  at TEXT NOT NULL DEFAULT (datetime('now')),
+  method TEXT NOT NULL,
+  path TEXT NOT NULL,
+  card_id INTEGER,
+  dry_run INTEGER NOT NULL DEFAULT 0,
+  before_json TEXT,
+  after_json TEXT
+);
+`,
+	},
 }
 
 func appliedVersions(db *sql.DB) (map[int]bool, error) {

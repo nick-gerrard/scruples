@@ -13,6 +13,7 @@ Stack: Go 1.26, SQLite via the pure-Go `modernc.org/sqlite` driver, server-rende
 - `internal/web`: `App` dependency container (`*sql.DB`), cookie sessions (`scruples_session`, 30-day TTL), `CurrentUser`, `RequireUser` (401 for htmx, 303 redirect to `/login` otherwise), and template helpers (`Render`, `RenderFragment`).
 - `internal/auth`: `SeedAdmin`, bcrypt auth, and routes for `/login`, `/signup`, `/logout`, `/account`, and `/account/password`.
 - `internal/cards`: deck routes (`/cards`, `/cards/new`, `POST /cards`, `DELETE /cards/{id}` — archives the card; author or admin only).
+- `internal/api`: JSON card API (`/api/cards...`) enabled only when `SCRUPLES_API_KEY` is set, with Bearer auth, `?dry_run=1` support, and `api_audit` logging.
 - `internal/game`:
   - `game.go`: HTTP handlers for `/game`, `/game/state`, `/game/{start,join,draw,answer,vote,challenge,challenge/vote,next,end}`, and `/winners`.
   - `logic.go`: game state transitions (`doStart`, `doJoin`, `pickCard`, `doDraw`, `maybeReveal`, `awardAndFinish`, `doNext`, `maybeResolveChallenge`, `doEnd`).
@@ -28,6 +29,14 @@ Stack: Go 1.26, SQLite via the pure-Go `modernc.org/sqlite` driver, server-rende
 - **Freeplay mode**: every eligible player (including the drawer) votes for themselves; `maybeReveal` shows tallies, and `POST /game/next` marks the round `complete`.
 - **Live updates**: `#game-state` in `templates/game.html` polls `GET /game/state` every 2s (`hx-trigger="every 2s"`). Every valid htmx game action returns the `game-state` fragment (a bad value on `/game/answer`, `/game/vote` or `/game/challenge/vote` gets a plain 400) to swap into `#game-state` (non-htmx requests redirect 303 to `/game`).
 
+## Card API
+
+- Enabled only when `SCRUPLES_API_KEY` is non-empty; otherwise every `/api/` path returns 404.
+- **Auth**: `Authorization: Bearer <key>` compared with `crypto/subtle.ConstantTimeCompare` (401 JSON `{"error":"unauthorized"}` on missing/wrong key). JSON only; no cookies or sessions.
+- **Endpoints**: `GET /api/cards` (`?source=human|ai&archived=0|1|all&author=&q=`, default `archived=0`), `GET /api/cards/{id}`, `POST /api/cards` (defaults `source="ai"`, `author="Claude"`), `PATCH /api/cards/{id}`, `POST /api/cards/{id}/archive`, `POST /api/cards/{id}/restore`, and `POST /api/cards/batch` (all-or-nothing single transaction).
+- **Dry runs & audit**: every write accepts `?dry_run=1` (runs in a transaction, rolls back, returns what would have happened). Every write—dry or not—writes before/after JSON to `api_audit` (for dry runs, recorded after rollback).
+- **Bot user**: migration 3 seeds the `Claude` user (`is_bot = 1`, `password_hash = '!'`) as the default AI card author; `POST /login` always refuses `is_bot` users.
+
 ## Running Locally & Testing
 
 Environment variables (all optional locally):
@@ -35,6 +44,7 @@ Environment variables (all optional locally):
 - `SCRUPLES_ADDR`: listen address (default `:8080`).
 - `SCRUPLES_DB`: SQLite file path (default `scruples.db`).
 - `SCRUPLES_ADMIN_PASSWORD`: initial password for the seeded `nick` admin user (if unset when `nick` does not exist yet, a random 16-byte hex password is generated and logged once; set `SCRUPLES_RESET_ADMIN_PASSWORD=1` to force-reset on startup).
+- `SCRUPLES_API_KEY`: Bearer token enabling `/api/*` (omit to disable the API; in production this lives in the server's roost env file, never in `deploy.toml` or git).
 
 Common commands (see `Makefile`):
 
@@ -50,6 +60,6 @@ make build   # go build -o scruples .
 - **MOBILE-FIRST**: design layouts, typography, and touch targets for ~390px wide phones first (the layout caps content at `max-w-2xl` with large full-width tap targets).
 - **Never call `app.DB` inside an open transaction**: `db.Open` calls `SetMaxOpenConns(1)`, so querying `app.DB` while holding a `*sql.Tx` will deadlock. Pass the `*sql.Tx` (via `querier`) to any helper called inside a transaction.
 - **Keep handlers' state checks inside transactions**: check current game/round state and apply mutations in the same transaction to avoid check-then-act races.
-- **No secrets in git**: `*.db` files are gitignored; production `SCRUPLES_ADMIN_PASSWORD` lives in the server's roost env file, never in `deploy.toml` or source code.
+- **No secrets in git**: `*.db` files are gitignored; production `SCRUPLES_ADMIN_PASSWORD` and `SCRUPLES_API_KEY` live in the server's roost env file, never in `deploy.toml` or source code.
 - **Schema changes**: append a new entry to `migrations` in `internal/db/migrate.go` with the next integer `Version`; never edit a migration that has already been applied.
 - **Branch & PR workflow**: always work on a branch and open a pull request. `main` is protected, and merging to `main` automatically deploys to production via `roost`.

@@ -95,10 +95,11 @@ func Routes(mux *http.ServeMux, app *web.App) {
 
 		var id int64
 		var hash string
+		var isBot bool
 		err := app.DB.QueryRow(
-			`SELECT id, password_hash FROM users WHERE username = ?`, username,
-		).Scan(&id, &hash)
-		if err != nil || bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) != nil {
+			`SELECT id, password_hash, is_bot FROM users WHERE username = ?`, username,
+		).Scan(&id, &hash, &isBot)
+		if err != nil || isBot || bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) != nil {
 			app.Render(w, r, "login.html", formData{
 				Error:    "Wrong username or password.",
 				Username: username,
