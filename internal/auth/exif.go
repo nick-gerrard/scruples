@@ -1,39 +1,46 @@
 package auth
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/binary"
 	"image"
 	"io"
 )
 
-// readJPEGEXIFOrientation scans the JPEG APP1 EXIF segment for the TIFF IFD0
-// Orientation tag (0x0112). Returns 1 (normal) if absent or unreadable.
+const maxEXIFScanBytes = 128 << 10 // 128 KiB
+
+// readJPEGEXIFOrientation scans up to the first JPEG APP1 segment (or 128 KiB,
+// whichever comes first) for the TIFF IFD0 Orientation tag (0x0112). Returns 1
+// (normal) if absent or unreadable.
 func readJPEGEXIFOrientation(r io.Reader) int {
+	br := bufio.NewReader(io.LimitReader(r, maxEXIFScanBytes))
+
 	var soi [2]byte
-	if _, err := io.ReadFull(r, soi[:]); err != nil || soi[0] != 0xFF || soi[1] != 0xD8 {
+	if _, err := io.ReadFull(br, soi[:]); err != nil || soi[0] != 0xFF || soi[1] != 0xD8 {
 		return 1
 	}
 
-	var b [1]byte
 	for {
 		// Find marker prefix 0xFF.
 		for {
-			if _, err := io.ReadFull(r, b[:]); err != nil {
+			b, err := br.ReadByte()
+			if err != nil {
 				return 1
 			}
-			if b[0] == 0xFF {
+			if b == 0xFF {
 				break
 			}
 		}
 		// Skip any fill 0xFF bytes.
 		var marker byte
 		for {
-			if _, err := io.ReadFull(r, b[:]); err != nil {
+			b, err := br.ReadByte()
+			if err != nil {
 				return 1
 			}
-			if b[0] != 0xFF {
-				marker = b[0]
+			if b != 0xFF {
+				marker = b
 				break
 			}
 		}
@@ -48,7 +55,7 @@ func readJPEGEXIFOrientation(r io.Reader) int {
 		}
 
 		var lenBuf [2]byte
-		if _, err := io.ReadFull(r, lenBuf[:]); err != nil {
+		if _, err := io.ReadFull(br, lenBuf[:]); err != nil {
 			return 1
 		}
 		segLen := int(binary.BigEndian.Uint16(lenBuf[:]))
@@ -58,18 +65,19 @@ func readJPEGEXIFOrientation(r io.Reader) int {
 		payloadLen := segLen - 2
 
 		if marker != 0xE1 {
-			if _, err := io.CopyN(io.Discard, r, int64(payloadLen)); err != nil {
+			if _, err := io.CopyN(io.Discard, br, int64(payloadLen)); err != nil {
 				return 1
 			}
 			continue
 		}
 
+		// Stop scanning after the first APP1 segment.
 		payload := make([]byte, payloadLen)
-		if _, err := io.ReadFull(r, payload); err != nil {
+		if _, err := io.ReadFull(br, payload); err != nil {
 			return 1
 		}
 		if !bytes.HasPrefix(payload, []byte("Exif\x00\x00")) {
-			continue
+			return 1
 		}
 		return parseTIFFOrientation(payload[6:])
 	}
@@ -92,14 +100,14 @@ func parseTIFFOrientation(tiff []byte) int {
 		return 1
 	}
 
-	ifd0 := int(order.Uint32(tiff[4:8]))
-	if ifd0 < 8 || ifd0+2 > len(tiff) {
+	ifd0 := int64(order.Uint32(tiff[4:8]))
+	if ifd0 < 8 || ifd0 > int64(len(tiff))-2 {
 		return 1
 	}
 	numEntries := int(order.Uint16(tiff[ifd0 : ifd0+2]))
 	for i := 0; i < numEntries; i++ {
-		off := ifd0 + 2 + i*12
-		if off+12 > len(tiff) {
+		off := ifd0 + 2 + int64(i)*12
+		if off > int64(len(tiff))-12 {
 			break
 		}
 		tag := order.Uint16(tiff[off : off+2])
