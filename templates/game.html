@@ -145,6 +145,15 @@
     <input type="checkbox" name="include_ai" value="1" checked class="peer sr-only">
     <span class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full bg-line-strong transition peer-checked:bg-primary after:absolute after:left-0.5 after:h-5 after:w-5 after:rounded-full after:bg-white after:transition peer-checked:after:translate-x-5"></span>
   </label>
+  <label class="flex min-h-[44px] cursor-pointer items-center justify-between gap-3 rounded-xl border border-line-strong bg-page/60 px-4 py-3">
+    <div>
+      <div class="text-sm font-semibold text-ink">Guess who wrote it</div>
+      <div class="text-xs text-muted">Everyone guesses each card's author</div>
+    </div>
+    <input type="hidden" name="guess_author_present" value="1">
+    <input type="checkbox" name="guess_author" value="1" class="peer sr-only">
+    <span class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full bg-line-strong transition peer-checked:bg-primary after:absolute after:left-0.5 after:h-5 after:w-5 after:rounded-full after:bg-white after:transition peer-checked:after:translate-x-5"></span>
+  </label>
   <button type="submit" class="btn btn-primary btn-lg">Start game</button>
 </form>
 {{end}}
@@ -211,6 +220,26 @@
     <p class="italic text-ink-dim">{{.Card.Circumstance}}</p>
     <p class="mt-2.5 text-lg font-bold text-ink">{{.Card.Question}}</p>
   </div>
+
+  {{if .GuessShown}}
+  <div class="space-y-2 rounded-2xl border border-line bg-surface p-4">
+    <div class="flex min-w-0 items-center gap-2 text-sm text-muted">
+      <span>Written by</span>
+      {{avatar .AuthorID .AuthorName 22}}
+      <span class="truncate font-bold text-ink">{{.AuthorName}}</span>
+    </div>
+    {{if .Guesses}}
+    <ul class="space-y-1.5">
+      {{range .Guesses}}
+      <li class="flex min-w-0 items-center justify-between gap-2 text-sm">
+        <span class="truncate font-semibold {{if .Correct}}text-yes-bright{{else}}text-ink-dim{{end}}">{{if .Correct}}✓{{else}}✗{{end}} {{.Name}}</span>
+        <span class="shrink-0 truncate text-xs text-muted">{{if not .Correct}}guessed {{.GuessedName}}{{end}}</span>
+      </li>
+      {{end}}
+    </ul>
+    {{end}}
+  </div>
+  {{end}}
 
   {{if .Classic}}
     {{if .Challenged}}
@@ -377,6 +406,9 @@
     <div class="mt-1 text-sm text-muted">{{if $d.Classic}}Ended early — no winner this time.{{else}}Thanks for playing.{{end}}</div>
     {{end}}
   </div>
+  {{if $d.BestGuessers}}
+  <div class="text-center text-sm text-muted">🕵️ Best guesser: <span class="font-semibold text-ink">{{range $i, $n := $d.BestGuessers}}{{if $i}} &amp; {{end}}{{$n}}{{end}}</span> ({{$d.BestGuessCount}} right)</div>
+  {{end}}
   {{if gt $d.CompletedRounds 0}}
   <div class="flex justify-center">
     <button type="button"
@@ -420,6 +452,14 @@
       </button>
       {{else if not $d.IncludeAI}}
       <span class="rounded-full border border-line bg-surface px-2.5 py-1 text-xs text-muted-dim">AI deck: OFF</span>
+      {{end}}
+      {{if $d.Me.CanToggleGuess}}
+      <button type="button" hx-post="/game/guess-author" hx-target="#game-state" hx-swap="innerHTML"
+              class="inline-flex min-h-[44px] items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition active:scale-[0.97] {{if $d.GuessAuthor}}border-primary-line/50 bg-primary/15 text-primary-pale hover:bg-primary/25{{else}}border-line-strong bg-surface text-muted hover:text-ink{{end}}">
+        <span>Guess author: {{if $d.GuessAuthor}}ON{{else}}OFF{{end}}</span>
+      </button>
+      {{else if $d.GuessAuthor}}
+      <span class="rounded-full border border-line bg-surface px-2.5 py-1 text-xs text-muted-dim">Guess author: ON</span>
       {{end}}
       {{if and (gt $d.CompletedRounds 0) (not $d.Discussion)}}
       <button type="button"
@@ -519,6 +559,28 @@
         {{end}}
       </div>
     </div>
+
+    {{with $r.Guess}}
+    <div class="rounded-2xl border border-line bg-surface p-4">
+      {{if .IsAuthor}}
+      <div class="text-center text-sm font-semibold text-primary-pale">Your card — sit this one out ✍️</div>
+      {{else if .CanGuess}}
+      <div class="mb-2 text-sm font-semibold text-ink">Who wrote this?</div>
+      <div class="grid grid-cols-2 gap-2">
+        {{$mine := .MyGuessID}}
+        {{range .Candidates}}
+        <button type="button" hx-post="/game/guess" hx-vals='{"author_id":"{{.ID}}"}' hx-target="#game-state" hx-swap="innerHTML"
+                aria-pressed="{{if eq .ID $mine}}true{{else}}false{{end}}"
+                class="flex min-h-[44px] min-w-0 items-center gap-2 rounded-xl border px-2.5 py-2 text-left text-sm font-semibold transition active:scale-[0.98] {{if eq .ID $mine}}border-primary-line bg-primary/25 text-primary-pale{{else}}border-line-strong bg-page/60 text-ink-dim{{end}}">
+          {{avatarv .ID .Name 24 .AvatarVer}}
+          <span class="truncate">{{.Name}}</span>
+        </button>
+        {{end}}
+      </div>
+      {{end}}
+      <div class="mt-2 text-center text-xs text-muted">{{.Guessed}} guessed</div>
+    </div>
+    {{end}}
 
     {{if eq $r.Status "voting"}}
       {{if and $d.Classic $d.Me.IsDrawer}}

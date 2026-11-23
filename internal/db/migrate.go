@@ -135,6 +135,20 @@ ALTER TABLE users ADD COLUMN avatar_path TEXT;
 ALTER TABLE games ADD COLUMN include_ai INTEGER NOT NULL DEFAULT 1;
 `,
 	},
+	{
+		Version: 7,
+		Name:    "guess_author",
+		SQL: `
+ALTER TABLE games ADD COLUMN guess_author INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE IF NOT EXISTS author_guesses (
+  round_id INTEGER NOT NULL REFERENCES rounds(id),
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  guessed_author_id INTEGER NOT NULL REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (round_id, user_id)
+);
+`,
+	},
 }
 
 func appliedVersions(db *sql.DB) (map[int]bool, error) {

@@ -3,6 +3,7 @@ package game
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 
 	"scruples/internal/web"
@@ -71,6 +72,11 @@ func discussionOpen(rd *roundRow, now time.Time) bool {
 // turn_order 1. Silently a no-op if a game is already running (race-safe:
 // the check and insert share one transaction, and the pool has one conn).
 func doStart(db *sql.DB, u *web.User, mode string, pointGoal, discussionSeconds int, includeAI bool) error {
+	return doStartGame(db, u, mode, pointGoal, discussionSeconds, includeAI, false)
+}
+
+// doStartGame is doStart with the optional "guess who wrote it" setting.
+func doStartGame(db *sql.DB, u *web.User, mode string, pointGoal, discussionSeconds int, includeAI, guessAuthor bool) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return err
@@ -92,9 +98,13 @@ func doStart(db *sql.DB, u *web.User, mode string, pointGoal, discussionSeconds 
 	if includeAI {
 		incAI = 1
 	}
+	guess := 0
+	if guessAuthor {
+		guess = 1
+	}
 	res, err := tx.Exec(
-		`INSERT INTO games (mode, point_goal, created_by, discussion_seconds, include_ai) VALUES (?, ?, ?, ?, ?)`,
-		mode, goal, u.ID, discussionSeconds, incAI)
+		`INSERT INTO games (mode, point_goal, created_by, discussion_seconds, include_ai, guess_author) VALUES (?, ?, ?, ?, ?, ?)`,
+		mode, goal, u.ID, discussionSeconds, incAI, guess)
 	if err != nil {
 		return err
 	}
@@ -133,6 +143,141 @@ func doToggleAI(db *sql.DB, u *web.User) error {
 	if _, err := tx.Exec(
 		`UPDATE games SET include_ai = ? WHERE id = ? AND status = 'active'`,
 		next, g.ID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// doToggleGuess flips guess_author on the active game. Only the game creator
+// or an admin may toggle it; otherwise it is a silent no-op.
+func doToggleGuess(db *sql.DB, u *web.User) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	g, err := activeGame(tx)
+	if err != nil || g == nil {
+		return err
+	}
+	if !isHost(g, u) {
+		return nil
+	}
+	next := 1
+	if g.GuessAuthor {
+		next = 0
+	}
+	if _, err := tx.Exec(
+		`UPDATE games SET guess_author = ? WHERE id = ? AND status = 'active'`,
+		next, g.ID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// errGuessRejected wraps every reason doGuess refuses a guess.
+var errGuessRejected = errors.New("guess rejected")
+
+// guessCandidate is someone a player may name as a card's author.
+type guessCandidate struct {
+	ID        int64
+	Name      string
+	AvatarVer string
+}
+
+// guessCandidates lists the distinct authors of the active deck the game draws
+// from, plus the authors of every card drawn in this game's rounds (including
+// the current one), sorted by name, never including excludeID. The Claude bot
+// appears from the deck only when AI cards are in play.
+//
+// Drawn-card authors stay candidates even if their cards were archived or AI
+// was switched off after the draw, so a correct guess stays possible without
+// the current card's author being singled out.
+func guessCandidates(q querier, gameID int64, includeAI bool, excludeID int64) ([]guessCandidate, error) {
+	deck := "c.archived_at IS NULL"
+	if !includeAI {
+		deck += " AND c.source != 'ai'"
+	}
+	userCond := "u.id IN (SELECT c.author_id FROM cards c WHERE " + deck + ")"
+	if !includeAI {
+		userCond += " AND u.is_bot = 0"
+	}
+	rows, err := q.Query(
+		`SELECT u.id, u.username, COALESCE(u.avatar_path, '')
+		 FROM users u
+		 WHERE u.id != ? AND ((`+userCond+`) OR u.id IN (
+		   SELECT c.author_id FROM rounds r JOIN cards c ON c.id = r.card_id WHERE r.game_id = ?))
+		 ORDER BY u.username COLLATE NOCASE, u.id`, excludeID, gameID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []guessCandidate
+	for rows.Next() {
+		var c guessCandidate
+		var path string
+		if err := rows.Scan(&c.ID, &c.Name, &path); err != nil {
+			return nil, err
+		}
+		c.AvatarVer = web.AvatarVersion(path)
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// doGuess records (or changes) u's guess at who wrote the current card. The
+// state checks and the write share one transaction. Refusals wrap
+// errGuessRejected.
+func doGuess(db *sql.DB, u *web.User, guessedID int64) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	g, rd, err := loadCurrent(tx)
+	if err != nil {
+		return err
+	}
+	if g == nil || rd == nil || !g.GuessAuthor {
+		return fmt.Errorf("%w: guessing is off", errGuessRejected)
+	}
+	if rd.Status == "complete" {
+		return fmt.Errorf("%w: round is complete", errGuessRejected)
+	}
+	ok, err := isEligible(tx, g.ID, u.ID, rd.CreatedAt)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("%w: not in this round", errGuessRejected)
+	}
+	var authorID int64
+	if err := tx.QueryRow(`SELECT author_id FROM cards WHERE id = ?`, rd.CardID).Scan(&authorID); err != nil {
+		return err
+	}
+	if authorID == u.ID {
+		return fmt.Errorf("%w: you wrote this card", errGuessRejected)
+	}
+	cands, err := guessCandidates(tx, g.ID, g.IncludeAI, u.ID)
+	if err != nil {
+		return err
+	}
+	found := false
+	for _, c := range cands {
+		if c.ID == guessedID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("%w: not a candidate", errGuessRejected)
+	}
+	if _, err := tx.Exec(
+		`INSERT INTO author_guesses (round_id, user_id, guessed_author_id) VALUES (?, ?, ?)
+		 ON CONFLICT(round_id, user_id) DO UPDATE SET guessed_author_id = excluded.guessed_author_id, created_at = datetime('now')`,
+		rd.ID, u.ID, guessedID); err != nil {
 		return err
 	}
 	return tx.Commit()

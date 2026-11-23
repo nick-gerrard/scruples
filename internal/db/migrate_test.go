@@ -264,3 +264,37 @@ func TestMigrationsGapTolerance(t *testing.T) {
 		t.Fatalf("games.include_ai present = %d (err %v), want 1", n, err)
 	}
 }
+
+func TestMigrationV7GuessAuthor(t *testing.T) {
+	d, err := Open(filepath.Join(t.TempDir(), "v7.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = d.Close() })
+
+	var n int
+	if err := d.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE version = 7 AND name = 'guess_author'`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("migration 7 recorded = %d (err %v), want 1", n, err)
+	}
+	if err := d.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('games') WHERE name = 'guess_author'`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("games.guess_author present = %d (err %v), want 1", n, err)
+	}
+	if err := d.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('author_guesses')`).Scan(&n); err != nil || n != 4 {
+		t.Fatalf("author_guesses columns = %d (err %v), want 4", n, err)
+	}
+
+	res, err := d.Exec(`INSERT INTO users (username, password_hash) VALUES ('u', 'x')`)
+	if err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	uid, _ := res.LastInsertId()
+	res, err = d.Exec(`INSERT INTO games (mode, point_goal, created_by) VALUES ('classic', 5, ?)`, uid)
+	if err != nil {
+		t.Fatalf("insert game: %v", err)
+	}
+	gid, _ := res.LastInsertId()
+	var ga int
+	if err := d.QueryRow(`SELECT guess_author FROM games WHERE id = ?`, gid).Scan(&ga); err != nil || ga != 0 {
+		t.Fatalf("default guess_author = %d (err %v), want 0", ga, err)
+	}
+}
